@@ -71,7 +71,21 @@ can now proceed to build `librespeed-cli` with the build script:
 
 ## Install from AUR/Homebrew
 
-TODO
+To install `librespeed-cli` from AUR, use your favorite AUR helper and install package `librespeed-cli-bin`
+
+```shell script
+$ yay librespeed-cli-bin
+```
+
+... or, clone it and build it yourself:
+
+```shell script
+$ git clone https://aur.archlinux.org/librespeed-cli-bin.git
+$ cd librespeed-cli-bin
+$ makepkg -si
+```
+
+TODO: Homebrew
 
 ## Usage
 
