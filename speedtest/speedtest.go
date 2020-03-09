@@ -1,0 +1,381 @@
+package speedtest
+
+import (
+	"encoding/json"
+	"errors"
+	"io/ioutil"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gocarina/gocsv"
+	log "github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
+
+	"librespeed-cli/defs"
+	"librespeed-cli/report"
+)
+
+const (
+	// serverListUrl is the default remote server JSON URL
+	serverListUrl = `https://librespeed.org/backend-servers/servers.json`
+
+	defaultTelemetryLevel  = "basic"
+	defaultTelemetryServer = "https://librespeed.org"
+	defaultTelemetryPath   = "/results/telemetry.php"
+	defaultTeleemtryShare  = "/results/"
+)
+
+type PingJob struct {
+	Index  int
+	Server defs.Server
+}
+
+type PingResult struct {
+	Index int
+	Ping  float64
+}
+
+// SpeedTest is the actual main function that handles the speed test(s)
+func SpeedTest(c *cli.Context) error {
+	// check for suppressed output flags
+	var silent bool
+	if c.Bool(defs.OptionSimple) || c.Bool(defs.OptionJSON) || c.Bool(defs.OptionCSV) {
+		log.SetLevel(log.WarnLevel)
+		silent = true
+	}
+
+	// check for debug flag
+	if c.Bool(defs.OptionDebug) {
+		log.SetLevel(log.DebugLevel)
+	}
+
+	// print help
+	if c.Bool(defs.OptionHelp) {
+		return cli.ShowAppHelp(c)
+	}
+
+	// print version
+	if c.Bool(defs.OptionVersion) {
+		log.Warnf("%s %s (built on %s)", defs.ProgName, defs.ProgVersion, defs.BuildDate)
+		log.Warn("https://github.com/librespeed/speedtest-cli")
+		log.Warn("Licensed under GNU Lesser General Public License v3.0")
+		log.Warn("LibreSpeed\tCopyright (C) 2016-2020 Federico Dossena")
+		log.Warn("librespeed-cli\tCopyright (C) 2020 Maddie Zhan")
+		log.Warn("librespeed.org\tCopyright (C)")
+		return nil
+	}
+
+	// set CSV delimiter
+	gocsv.TagSeparator = c.String(defs.OptionCSVDelimiter)
+
+	// if --csv-header is given, print the header and exit (same behavior speedtest-cli)
+	if c.Bool(defs.OptionCSVHeader) {
+		var rep []report.CSVReport
+		b, _ := gocsv.MarshalBytes(&rep)
+		log.Warnf("%s", b)
+		return nil
+	}
+
+	// read telemetry settings if --share is given
+	var telemetryServer defs.TelemetryServer
+	if c.Bool(defs.OptionShare) {
+		if filename := c.String(defs.OptionTelemetryJSON); filename != "" {
+			b, err := ioutil.ReadFile(filename)
+			if err != nil {
+				log.Errorf("Cannot read %s: %s", filename, err)
+				return err
+			}
+			if err := json.Unmarshal(b, &telemetryServer); err != nil {
+				log.Errorf("Error parsing %s: %s", err)
+				return err
+			}
+		}
+
+		if str := c.String(defs.OptionTelemetryLevel); str != "" {
+			if str != "disabled" && str != "basic" && str != "full" && str != "debug" {
+				log.Fatalf("Unsupported telemetry level: %s", str)
+			}
+			telemetryServer.Level = str
+		} else if telemetryServer.Level == "" {
+			telemetryServer.Level = defaultTelemetryLevel
+		}
+
+		if str := c.String(defs.OptionTelemetryServer); str != "" {
+			telemetryServer.Server = str
+		} else if telemetryServer.Server == "" {
+			telemetryServer.Server = defaultTelemetryServer
+		}
+
+		if str := c.String(defs.OptionTelemetryPath); str != "" {
+			telemetryServer.Path = str
+		} else if telemetryServer.Path == "" {
+			telemetryServer.Path = defaultTelemetryPath
+		}
+
+		if str := c.String(defs.OptionTelemetryShare); str != "" {
+			telemetryServer.Share = str
+		} else if telemetryServer.Share == "" {
+			telemetryServer.Share = defaultTeleemtryShare
+		}
+	}
+
+	// HTTP requests timeout
+	http.DefaultClient.Timeout = time.Duration(c.Int(defs.OptionTimeout)) * time.Second
+
+	// bind to source IP address if given
+	if src := c.String(defs.OptionSource); src != "" {
+		// first we parse the IP to see if it's valid
+		localAddr, err := net.ResolveIPAddr("ip", src)
+		if err != nil {
+			log.Errorf("Error parsing source IP: %s", err)
+			return err
+		}
+
+		localTCPAddr := net.TCPAddr{IP: localAddr.IP}
+
+		// set default HTTP client's Transport to the one that binds the source address
+		// this is modified from http.DefaultTransport
+		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				LocalAddr: &localTCPAddr,
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+				// although this option is marked deprecated, but it's still used in http.DefaultTransport, keeping as-is
+				DualStack: true,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+
+		http.DefaultClient.Transport = transport
+	}
+
+	// load server list
+	var servers []defs.Server
+	var err error
+	if str := c.String(defs.OptionLocalJSON); str != "" {
+		// load server list from local JSON file
+		log.Infof("Using local JSON server list: %s", str)
+		servers, err = getLocalServers(c.Bool(defs.OptionSecure), str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+	} else {
+		// fetch the server list JSON and parse it into the `servers` array
+		log.Info("Retrieving LibreSpeed.org server list")
+		serverUrl := serverListUrl
+		if str := c.String(defs.OptionServerJSON); str != "" {
+			serverUrl = str
+		}
+
+		servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+	}
+	if err != nil {
+		log.Errorf("Error when fetching server list: %s", err)
+		return err
+	}
+
+	// if --list is given, list all the servers fetched and exit
+	if c.Bool(defs.OptionList) {
+		for idx, svr := range servers {
+			log.Warnf("%d: %s (%s)", idx, svr.Name, svr.Server)
+		}
+		return nil
+	}
+
+	// if --server is given, do speed tests with all of them
+	if len(c.IntSlice(defs.OptionServer)) > 0 {
+		return doSpeedTest(c, servers, telemetryServer, silent)
+	} else {
+		// else select the fastest server from the list
+		log.Info("Selecting the fastest server based on ping")
+
+		var wg sync.WaitGroup
+		jobs := make(chan PingJob, 10)
+		results := make(chan PingResult, 10)
+		done := make(chan struct{})
+
+		pingList := make(map[int]float64)
+
+		// spawn 10 concurrent pingers
+		for i := 0; i < 10; i++ {
+			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource))
+		}
+
+		// send ping jobs to workers
+		for idx, server := range servers {
+			wg.Add(1)
+			jobs <- PingJob{Index: idx, Server: server}
+		}
+
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+	Loop:
+		for {
+			select {
+			case result := <-results:
+				pingList[result.Index] = result.Ping
+			case <-done:
+				break Loop
+			}
+		}
+
+		if len(pingList) == 0 {
+			log.Fatal("No server is currently available, please try again later.")
+		}
+
+		// get the fastest server's index in the `servers` array
+		var serverIdx int
+		for idx, ping := range pingList {
+			if ping > 0 && ping <= pingList[serverIdx] {
+				serverIdx = idx
+			}
+		}
+
+		// do speed test on the server
+		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, silent)
+	}
+}
+
+func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp string) {
+	for {
+		job := <-jobs
+		server := job.Server
+		// get the URL of the speed test server from the JSON
+		u, err := server.GetURL()
+		if err != nil {
+			log.Debugf("Server URL is invalid for %s (%s), skipping", server.Name, server.Server)
+			wg.Done()
+			return
+		}
+
+		// check the server is up by accessing the ping URL and checking its returned value == empty and status code == 200
+		if server.IsUp() {
+			// if server is up, get ping
+			ping, _, err := server.ICMPPingAndJitter(1, srcIp)
+			if err != nil {
+				log.Debugf("Can't ping server %s (%s), skipping", server.Name, u.Hostname())
+				wg.Done()
+				return
+			}
+			// return result
+			results <- PingResult{Index: job.Index, Ping: ping}
+			wg.Done()
+		} else {
+			log.Debugf("Server %s (%s) doesn't seem to be up, skipping", server.Name, u.Hostname())
+			wg.Done()
+		}
+	}
+}
+
+// getServerList fetches the server JSON from a remote server
+func getServerList(forceHTTPS bool, serverList string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+	// --exclude and --server cannot be used at the same time
+	if len(excludes) > 0 && len(specific) > 0 {
+		return nil, errors.New("either --exclude or --server can be used")
+	}
+
+	// getting the server list from remote
+	var servers []defs.Server
+	resp, err := http.DefaultClient.Get(serverList)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := json.Unmarshal(b, &servers); err != nil {
+		return nil, err
+	}
+
+	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
+}
+
+// getLocalServers loads the server JSON from a local file
+func getLocalServers(forceHTTPS bool, jsonFile string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+	var servers []defs.Server
+	b, err := ioutil.ReadFile(jsonFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(b, &servers); err != nil {
+		return nil, err
+	}
+
+	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
+}
+
+// preprocessServers makes some needed modifications to the servers fetched
+func preprocessServers(servers []defs.Server, forceHTTPS bool, excludes, specific []int, filter bool) ([]defs.Server, error) {
+	for i := range servers {
+		u, err := servers[i].GetURL()
+		if err != nil {
+			return nil, err
+		}
+
+		// if no scheme is defined, use http as default, or https when --secure is given in cli options
+		// if the scheme is predefined and --secure is not given, we will use it as-is
+		if forceHTTPS {
+			u.Scheme = "https"
+		} else if u.Scheme == "" {
+			// if `secure` is not used and no scheme is defined, use http
+			u.Scheme = "http"
+		}
+
+		// modify the server struct in the array in place
+		servers[i].Server = u.String()
+	}
+
+	if len(excludes) > 0 && len(specific) > 0 {
+		return nil, errors.New("either --exclude or --specific can be used")
+	}
+
+	if filter {
+		// exclude servers from --exclude
+		if len(excludes) > 0 {
+			var ret []defs.Server
+			for idx, server := range servers {
+				if contains(excludes, idx) {
+					continue
+				}
+				ret = append(ret, server)
+			}
+			return ret, nil
+		}
+
+		// use only servers from --server
+		// special value -1 will test all servers
+		if len(specific) > 0 && !contains(specific, -1) {
+			var ret []defs.Server
+			for idx, server := range servers {
+				if contains(specific, idx) {
+					ret = append(ret, server)
+				}
+			}
+			return ret, nil
+		}
+	}
+
+	return servers, nil
+}
+
+// contains is a helper function to check if an int is in an int array
+func contains(arr []int, val int) bool {
+	for _, v := range arr {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
