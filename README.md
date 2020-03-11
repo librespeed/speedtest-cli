@@ -102,6 +102,8 @@ USAGE:
 GLOBAL OPTIONS:
    --help, -h                     show help (default: false)
    --version                      Show the version number and exit (default: false)
+   --ipv4, -4                     Force IPv4 only (default: false)
+   --ipv6, -6                     Force IPv6 only (default: false)
    --no-download                  Do not perform download test (default: false)
    --no-upload                    Do not perform upload test (default: false)
    --bytes                        Display values in bytes instead of bits. Does not affect
