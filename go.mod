@@ -9,6 +9,7 @@ require (
 	github.com/gocarina/gocsv v0.0.0-20200302151839-87c60d755c58
 	github.com/sirupsen/logrus v1.4.2
 	github.com/sparrc/go-ping v0.0.0-20190613174326-4e5b6552494c
+	github.com/stretchr/testify v1.3.0 // indirect
 	github.com/urfave/cli/v2 v2.1.1
 	golang.org/x/net v0.0.0-20200226121028-0de0cce0169b // indirect
 )
