@@ -69,7 +69,7 @@ can now proceed to build `librespeed-cli` with the build script:
    
 5. Now you can use the `librespeed-cli` and test your Internet speed!
 
-## Install from AUR/Homebrew
+## Install from AUR
 
 To install `librespeed-cli` from AUR, use your favorite AUR helper and install package `librespeed-cli-bin`
 
@@ -85,7 +85,9 @@ $ cd librespeed-cli-bin
 $ makepkg -si
 ```
 
-TODO: Homebrew
+## Install from Homebrew
+
+See the [librespeed-cli Homebrew tap](https://github.com/librespeed/homebrew-tap#setup).
 
 ## Usage
 
