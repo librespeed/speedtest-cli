@@ -1,11 +1,13 @@
 package speedtest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,28 +126,70 @@ func SpeedTest(c *cli.Context) error {
 	// HTTP requests timeout
 	http.DefaultClient.Timeout = time.Duration(c.Int(defs.OptionTimeout)) * time.Second
 
-	// bind to source IP address if given
-	if src := c.String(defs.OptionSource); src != "" {
-		// first we parse the IP to see if it's valid
-		localAddr, err := net.ResolveIPAddr("ip", src)
-		if err != nil {
-			log.Errorf("Error parsing source IP: %s", err)
-			return err
+	forceIPv4 := c.Bool(defs.OptionIPv4)
+	forceIPv6 := c.Bool(defs.OptionIPv6)
+
+	var network string
+	switch {
+	case forceIPv4:
+		network = "ip4"
+	case forceIPv6:
+		network = "ip6"
+	default:
+		network = "ip"
+	}
+
+	// bind to source IP address if given, or if ipv4/ipv6 is forced
+	if src := c.String(defs.OptionSource); src != "" || (forceIPv4 || forceIPv6) {
+		var localTCPAddr *net.TCPAddr
+		if src != "" {
+			// first we parse the IP to see if it's valid
+			addr, err := net.ResolveIPAddr(network, src)
+			if err != nil {
+				if strings.Contains(err.Error(), "no suitable address") {
+					if forceIPv6 {
+						log.Errorf("Address %s is not a valid IPv6 address", src)
+					} else {
+						log.Errorf("Address %s is not a valid IPv4 address", src)
+					}
+				} else {
+					log.Errorf("Error parsing source IP: %s", err)
+				}
+				return err
+			}
+
+			log.Debugf("Using %s as source IP", src)
+			localTCPAddr = &net.TCPAddr{IP: addr.IP}
 		}
 
-		localTCPAddr := net.TCPAddr{IP: localAddr.IP}
+		var dialContext func(context.Context, string, string) (net.Conn, error)
+		defaultDialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+
+		if localTCPAddr != nil {
+			defaultDialer.LocalAddr = localTCPAddr
+		}
+
+		switch {
+		case forceIPv4:
+			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+				return defaultDialer.DialContext(ctx, "tcp4", address)
+			}
+		case forceIPv6:
+			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+				return defaultDialer.DialContext(ctx, "tcp6", address)
+			}
+		default:
+			dialContext = defaultDialer.DialContext
+		}
 
 		// set default HTTP client's Transport to the one that binds the source address
 		// this is modified from http.DefaultTransport
 		transport := &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				LocalAddr: &localTCPAddr,
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-				// although this option is marked deprecated, but it's still used in http.DefaultTransport, keeping as-is
-				DualStack: true,
-			}).DialContext,
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			IdleConnTimeout:       90 * time.Second,
@@ -188,7 +232,7 @@ func SpeedTest(c *cli.Context) error {
 
 	// if --server is given, do speed tests with all of them
 	if len(c.IntSlice(defs.OptionServer)) > 0 {
-		return doSpeedTest(c, servers, telemetryServer, silent)
+		return doSpeedTest(c, servers, telemetryServer, network, silent)
 	} else {
 		// else select the fastest server from the list
 		log.Info("Selecting the fastest server based on ping")
@@ -202,7 +246,7 @@ func SpeedTest(c *cli.Context) error {
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
-			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource))
+			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network)
 		}
 
 		// send ping jobs to workers
@@ -239,11 +283,11 @@ func SpeedTest(c *cli.Context) error {
 		}
 
 		// do speed test on the server
-		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, silent)
+		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent)
 	}
 }
 
-func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp string) {
+func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string) {
 	for {
 		job := <-jobs
 		server := job.Server
@@ -258,7 +302,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 		// check the server is up by accessing the ping URL and checking its returned value == empty and status code == 200
 		if server.IsUp() {
 			// if server is up, get ping
-			ping, _, err := server.ICMPPingAndJitter(1, srcIp)
+			ping, _, err := server.ICMPPingAndJitter(1, srcIp, network)
 			if err != nil {
 				log.Debugf("Can't ping server %s (%s), skipping", server.Name, u.Hostname())
 				wg.Done()

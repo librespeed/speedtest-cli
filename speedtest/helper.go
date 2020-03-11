@@ -27,7 +27,7 @@ const (
 )
 
 // doSpeedTest is where the actual speed test happens
-func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.TelemetryServer, silent bool) error {
+func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.TelemetryServer, network string, silent bool) error {
 	if serverCount := len(servers); serverCount > 1 {
 		log.Infof("Testing against %d servers", serverCount)
 	}
@@ -61,7 +61,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				pb.Start()
 			}
 
-			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource))
+			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {
 				log.Errorf("Failed to get ping and jitter: %s", err)
 				return err

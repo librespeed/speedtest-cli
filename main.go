@@ -38,6 +38,16 @@ func main() {
 				Usage: "Show the version number and exit",
 			},
 			&cli.BoolFlag{
+				Name:    defs.OptionIPv4,
+				Aliases: []string{defs.OptionIPv4Alt},
+				Usage:   "Force IPv4 only",
+			},
+			&cli.BoolFlag{
+				Name:    defs.OptionIPv6,
+				Aliases: []string{defs.OptionIPv6Alt},
+				Usage:   "Force IPv6 only",
+			},
+			&cli.BoolFlag{
 				Name:  defs.OptionNoDownload,
 				Usage: "Do not perform download test",
 			},

@@ -43,6 +43,7 @@ func (s *Server) IsUp() bool {
 	u.Path = path.Join(u.Path, s.PingURL)
 	resp, err := http.Get(u.String())
 	if err != nil {
+		log.Debugf("Error checking for server status: %s", err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -52,7 +53,7 @@ func (s *Server) IsUp() bool {
 }
 
 // ICMPPingAndJitter pings the server via ICMP echos and calculate the average ping and jitter
-func (s *Server) ICMPPingAndJitter(count int, srcIp string) (float64, float64, error) {
+func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, float64, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("ICMP ping took %s", time.Now().Sub(t).String())
@@ -68,7 +69,8 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp string) (float64, float64, e
 		log.Debugf("Failed to get server URL: %s", err)
 		return 0, 0, err
 	}
-	p, err := ping.NewPinger(u.Hostname())
+
+	p, err := ping.NewPinger(u.Hostname(), network)
 	if err != nil {
 		log.Debugf("Failed to initialize pinger: %s", err)
 		return 0, 0, err
@@ -214,7 +216,7 @@ func (s *Server) Download(silent bool, useBytes bool) (float64, int, error) {
 			defer resp.Body.Close()
 
 			if _, err = io.Copy(ioutil.Discard, io.TeeReader(resp.Body, counter)); err != nil {
-				if !errors.Is(err, context.Canceled) {
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					log.Debugf("Failed when reading HTTP response: %s", err)
 				}
 			}
@@ -299,7 +301,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes bool) (float64, int, error)
 
 	doUpload := func() {
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			log.Debugf("Failed when making HTTP request: %s", err)
 		} else if err == nil {
 			defer resp.Body.Close()

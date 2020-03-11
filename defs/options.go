@@ -2,6 +2,10 @@ package defs
 
 const (
 	OptionHelp            = "help"
+	OptionIPv4            = "ipv4"
+	OptionIPv4Alt         = "4"
+	OptionIPv6            = "ipv6"
+	OptionIPv6Alt         = "6"
 	OptionNoDownload      = "no-download"
 	OptionNoUpload        = "no-upload"
 	OptionBytes           = "bytes"
