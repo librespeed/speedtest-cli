@@ -45,7 +45,7 @@ func (c *BytesCounter) Average() float64 {
 }
 
 func (c *BytesCounter) AvgMbps() float64 {
-	var base float64 = 100000
+	var base float64 = 125000
 	if c.mebi {
 		base = 131072
 	}
