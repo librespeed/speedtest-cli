@@ -9,6 +9,7 @@ const (
 	OptionNoDownload      = "no-download"
 	OptionNoUpload        = "no-upload"
 	OptionBytes           = "bytes"
+	OptionMebiBytes       = "mebibytes"
 	OptionDistance        = "distance"
 	OptionShare           = "share"
 	OptionSimple          = "simple"

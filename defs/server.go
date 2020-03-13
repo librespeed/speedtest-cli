@@ -177,13 +177,14 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 }
 
 // Download performs the actual download test
-func (s *Server) Download(silent bool, useBytes bool) (float64, int, error) {
+func (s *Server) Download(silent bool, useBytes, useMebi bool) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Download took %s", time.Now().Sub(t).String())
 	}()
 
 	counter := &BytesCounter{}
+	counter.SetMebi(useMebi)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -233,7 +234,7 @@ func (s *Server) Download(silent bool, useBytes bool) (float64, int, error) {
 			if useBytes {
 				s.Suffix = fmt.Sprintf("  %s", counter.AvgHumanize())
 			} else {
-				s.Suffix = fmt.Sprintf("  %s", counter.AvgMbits())
+				s.Suffix = fmt.Sprintf("  %.2f Mbps", counter.AvgMbps())
 			}
 		}
 
@@ -242,7 +243,7 @@ func (s *Server) Download(silent bool, useBytes bool) (float64, int, error) {
 			if useBytes {
 				pb.FinalMSG = fmt.Sprintf("Download rate:\t%s\n", counter.AvgHumanize())
 			} else {
-				pb.FinalMSG = fmt.Sprintf("Download rate:\t%s\n", counter.AvgMbits())
+				pb.FinalMSG = fmt.Sprintf("Download rate:\t%.2f Mbps\n", counter.AvgMbps())
 			}
 			pb.Stop()
 		}()
@@ -261,17 +262,18 @@ Loop:
 		}
 	}
 
-	return counter.Average() / 131072, counter.Total(), nil
+	return counter.AvgMbps(), counter.Total(), nil
 }
 
 // Upload performs the actual upload test
-func (s *Server) Upload(noPrealloc, silent, useBytes bool) (float64, int, error) {
+func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Upload took %s", time.Now().Sub(t).String())
 	}()
 
 	counter := &BytesCounter{}
+	counter.SetMebi(useMebi)
 
 	if noPrealloc {
 		log.Info("Pre-allocation is disabled, performance might be lower!")
@@ -322,7 +324,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes bool) (float64, int, error)
 			if useBytes {
 				s.Suffix = fmt.Sprintf("  %s", counter.AvgHumanize())
 			} else {
-				s.Suffix = fmt.Sprintf("  %s", counter.AvgMbits())
+				s.Suffix = fmt.Sprintf("  %.2f Mbps", counter.AvgMbps())
 			}
 		}
 
@@ -331,7 +333,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes bool) (float64, int, error)
 			if useBytes {
 				pb.FinalMSG = fmt.Sprintf("Upload rate:\t%s\n", counter.AvgHumanize())
 			} else {
-				pb.FinalMSG = fmt.Sprintf("Upload rate:\t%s\n", counter.AvgMbits())
+				pb.FinalMSG = fmt.Sprintf("Upload rate:\t%.2f Mbps\n", counter.AvgMbps())
 			}
 			pb.Stop()
 		}()
@@ -350,7 +352,7 @@ Loop:
 		}
 	}
 
-	return counter.Average() / 131072, counter.Total(), nil
+	return counter.AvgMbps(), counter.Total(), nil
 }
 
 // GetIPInfo accesses the backend's getIP.php endpoint and get current client's IP information

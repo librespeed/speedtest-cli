@@ -78,7 +78,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			if c.Bool(defs.OptionNoDownload) {
 				log.Info("Download test is disabled")
 			} else {
-				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes))
+				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes))
 				if err != nil {
 					log.Errorf("Failed to get download speed: %s", err)
 					return err
@@ -93,7 +93,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			if c.Bool(defs.OptionNoUpload) {
 				log.Info("Upload test is disabled")
 			} else {
-				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes))
+				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes))
 				if err != nil {
 					log.Errorf("Failed to get upload speed: %s", err)
 					return err
@@ -105,7 +105,8 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			// print result if --simple is given
 			if c.Bool(defs.OptionSimple) {
 				if c.Bool(defs.OptionBytes) {
-					log.Warnf("Ping:\t%.0f ms\tJitter:\t%.0f ms\nDownload rate:\t%s\nUpload rate:\t%s", p, jitter, humanizeMbps(downloadValue), humanizeMbps(uploadValue))
+					useMebi := c.Bool(defs.OptionMebiBytes)
+					log.Warnf("Ping:\t%.0f ms\tJitter:\t%.0f ms\nDownload rate:\t%s\nUpload rate:\t%s", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
 				} else {
 					log.Warnf("Ping:\t%.0f ms\tJitter:\t%.0f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps", p, jitter, downloadValue, uploadValue)
 				}
@@ -299,16 +300,21 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	}
 }
 
-func humanizeMbps(mbps float64) string {
+func humanizeMbps(mbps float64, useMebi bool) string {
 	val := mbps / 8
+	var base float64 = 1000
+	if useMebi {
+		base = 1024
+	}
+
 	if val < 1 {
-		if kb := val * 1024; kb < 1 {
-			return fmt.Sprintf("%.2f bytes/s", kb*1024)
+		if kb := val * base; kb < 1 {
+			return fmt.Sprintf("%.2f bytes/s", kb*base)
 		} else {
 			return fmt.Sprintf("%.2f KB/s", kb)
 		}
-	} else if val > 1024 {
-		return fmt.Sprintf("%.2f GB/s", val/1024)
+	} else if val > base {
+		return fmt.Sprintf("%.2f GB/s", val/base)
 	} else {
 		return fmt.Sprintf("%.2f MB/s", val)
 	}

@@ -15,6 +15,7 @@ type BytesCounter struct {
 	total   int
 	payload []byte
 	reader  io.ReadSeeker
+	mebi    bool
 }
 
 // Write implements io.Writer
@@ -33,26 +34,40 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// SetBase sets the base for dividing bytes into megabyte or mebibyte
+func (c *BytesCounter) SetMebi(mebi bool) {
+	c.mebi = mebi
+}
+
 // Average returns the average bytes/second
 func (c *BytesCounter) Average() float64 {
 	return float64(c.total) / time.Now().Sub(c.start).Seconds()
 }
 
-func (c *BytesCounter) AvgMbits() string {
-	return fmt.Sprintf("%.02f Mbps", c.Average()/131072)
+func (c *BytesCounter) AvgMbps() float64 {
+	var base float64 = 100000
+	if c.mebi {
+		base = 131072
+	}
+	return c.Average() / base
 }
 
 func (c *BytesCounter) AvgHumanize() string {
 	val := c.Average()
 
-	if val < 1024 {
+	var base float64 = 1000
+	if c.mebi {
+		base = 1024
+	}
+
+	if val < base {
 		return fmt.Sprintf("%.2f bytes/s", val)
-	} else if val/1024 < 1024 {
-		return fmt.Sprintf("%.2f KB/s", val/1024)
-	} else if val/1024/1024 < 1024 {
-		return fmt.Sprintf("%.2f MB/s", val/1024/1024)
+	} else if val/base < base {
+		return fmt.Sprintf("%.2f KB/s", val/base)
+	} else if val/base/base < base {
+		return fmt.Sprintf("%.2f MB/s", val/base/base)
 	} else {
-		return fmt.Sprintf("%.2f GB/s", val/1024/1024/1024)
+		return fmt.Sprintf("%.2f GB/s", val/base/base/base)
 	}
 }
 
