@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -16,12 +17,22 @@ type BytesCounter struct {
 	payload []byte
 	reader  io.ReadSeeker
 	mebi    bool
+
+	lock *sync.Mutex
+}
+
+func NewCounter() *BytesCounter {
+	return &BytesCounter{
+		lock: &sync.Mutex{},
+	}
 }
 
 // Write implements io.Writer
 func (c *BytesCounter) Write(p []byte) (int, error) {
 	n := len(p)
+	c.lock.Lock()
 	c.total += n
+	c.lock.Unlock()
 
 	return n, nil
 }
@@ -29,7 +40,9 @@ func (c *BytesCounter) Write(p []byte) (int, error) {
 // Read implements io.Reader
 func (c *BytesCounter) Read(p []byte) (int, error) {
 	n, err := c.reader.Read(p)
+	c.lock.Lock()
 	c.total += n
+	c.lock.Unlock()
 
 	return n, err
 }
@@ -39,8 +52,8 @@ func (c *BytesCounter) SetMebi(mebi bool) {
 	c.mebi = mebi
 }
 
-// Average returns the average bytes/second
-func (c *BytesCounter) Average() float64 {
+// AvgBytes returns the average bytes/second
+func (c *BytesCounter) AvgBytes() float64 {
 	return float64(c.total) / time.Now().Sub(c.start).Seconds()
 }
 
@@ -49,11 +62,11 @@ func (c *BytesCounter) AvgMbps() float64 {
 	if c.mebi {
 		base = 131072
 	}
-	return c.Average() / base
+	return c.AvgBytes() / base
 }
 
 func (c *BytesCounter) AvgHumanize() string {
-	val := c.Average()
+	val := c.AvgBytes()
 
 	var base float64 = 1000
 	if c.mebi {

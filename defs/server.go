@@ -177,13 +177,13 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 }
 
 // Download performs the actual download test
-func (s *Server) Download(silent bool, useBytes, useMebi bool) (float64, int, error) {
+func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Download took %s", time.Now().Sub(t).String())
 	}()
 
-	counter := &BytesCounter{}
+	counter := NewCounter()
 	counter.SetMebi(useMebi)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,7 +207,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool) (float64, int, er
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	downloadDone := make(chan struct{})
+	downloadDone := make(chan struct{}, requests)
 
 	doDownload := func() {
 		resp, err := http.DefaultClient.Do(req)
@@ -249,7 +249,10 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool) (float64, int, er
 		}()
 	}
 
-	go doDownload()
+	for i := 0; i < requests; i++ {
+		go doDownload()
+		time.Sleep(200 * time.Millisecond)
+	}
 	timeout := time.After(15 * time.Second)
 Loop:
 	for {
@@ -266,13 +269,13 @@ Loop:
 }
 
 // Upload performs the actual upload test
-func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool) (float64, int, error) {
+func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Upload took %s", time.Now().Sub(t).String())
 	}()
 
-	counter := &BytesCounter{}
+	counter := NewCounter()
 	counter.SetMebi(useMebi)
 
 	if noPrealloc {
@@ -299,7 +302,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool) (float64, in
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	uploadDone := make(chan struct{})
+	uploadDone := make(chan struct{}, requests)
 
 	doUpload := func() {
 		resp, err := http.DefaultClient.Do(req)
@@ -339,7 +342,10 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool) (float64, in
 		}()
 	}
 
-	go doUpload()
+	for i := 0; i < requests; i++ {
+		go doUpload()
+		time.Sleep(200 * time.Millisecond)
+	}
 	timeout := time.After(15 * time.Second)
 Loop:
 	for {

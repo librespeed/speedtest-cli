@@ -123,6 +123,11 @@ func SpeedTest(c *cli.Context) error {
 		}
 	}
 
+	if req := c.Int(defs.OptionConcurrent); req <= 0 {
+		log.Errorf("Concurrent requests cannot be lower than 1: %d is given", req)
+		return errors.New("invalid concurrent requests setting")
+	}
+
 	// HTTP requests timeout
 	http.DefaultClient.Timeout = time.Duration(c.Int(defs.OptionTimeout)) * time.Second
 

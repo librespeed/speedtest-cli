@@ -55,6 +55,11 @@ func main() {
 				Name:  defs.OptionNoUpload,
 				Usage: "Do not perform upload test",
 			},
+			&cli.IntFlag{
+				Name:  defs.OptionConcurrent,
+				Usage: "Concurrent HTTP requests being made",
+				Value: 3,
+			},
 			&cli.BoolFlag{
 				Name: defs.OptionBytes,
 				Usage: "Display values in bytes instead of bits. Does not affect\n" +
