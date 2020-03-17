@@ -314,7 +314,6 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 				log.Debugf("Failed when reading HTTP response: %s", err)
 			}
 
-			counter.ResetReader()
 			uploadDone <- struct{}{}
 		}
 	}

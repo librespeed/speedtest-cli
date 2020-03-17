@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"sync"
 	"time"
 )
@@ -42,6 +43,10 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 	n, err := c.reader.Read(p)
 	c.lock.Lock()
 	c.total += n
+
+	if math.Mod(float64(c.total), uploadSize) == 0 {
+		c.resetReader()
+	}
 	c.lock.Unlock()
 
 	return n, err
@@ -91,8 +96,8 @@ func (c *BytesCounter) GenerateBlob() {
 	c.reader = bytes.NewReader(c.payload)
 }
 
-// ResetReader resets the `reader` field to 0 position
-func (c *BytesCounter) ResetReader() (int64, error) {
+// resetReader resets the `reader` field to 0 position
+func (c *BytesCounter) resetReader() (int64, error) {
 	return c.reader.Seek(0, 0)
 }
 
