@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"sync"
 	"time"
 )
@@ -14,6 +13,7 @@ import (
 // BytesCounter implements io.Reader and io.Writer interface, for counting bytes being read/written in HTTP requests
 type BytesCounter struct {
 	start   time.Time
+	pos     int
 	total   int
 	payload []byte
 	reader  io.ReadSeeker
@@ -43,8 +43,9 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 	n, err := c.reader.Read(p)
 	c.lock.Lock()
 	c.total += n
-
-	if math.Mod(float64(c.total), uploadSize) == 0 {
+	c.pos += n
+	if c.pos == uploadSize {
+		c.pos = 0
 		c.resetReader()
 	}
 	c.lock.Unlock()
