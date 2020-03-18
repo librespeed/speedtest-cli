@@ -114,7 +114,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 			// print share link if --share is given
 			var shareLink string
-			if c.Bool(defs.OptionShare) && !c.Bool(defs.OptionCSV) && telemetryServer.GetLevel() > 0 {
+			if !c.Bool(defs.OptionCSV) && telemetryServer.GetLevel() > 0 {
 				var extra defs.TelemetryExtra
 				extra.ServerName = currentServer.Name
 				extra.Extra = c.String(defs.OptionTelemetryExtra)

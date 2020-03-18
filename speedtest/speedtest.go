@@ -26,7 +26,7 @@ const (
 	defaultTelemetryLevel  = "basic"
 	defaultTelemetryServer = "https://librespeed.org"
 	defaultTelemetryPath   = "/results/telemetry.php"
-	defaultTeleemtryShare  = "/results/"
+	defaultTelemetryShare  = "/results/"
 )
 
 type PingJob struct {
@@ -80,13 +80,18 @@ func SpeedTest(c *cli.Context) error {
 		return nil
 	}
 
-	// read telemetry settings if --share is given
+	// read telemetry settings if --share or any --telemetry option is given
 	var telemetryServer defs.TelemetryServer
-	if c.Bool(defs.OptionShare) {
-		if filename := c.String(defs.OptionTelemetryJSON); filename != "" {
-			b, err := ioutil.ReadFile(filename)
+	telemetryJSON := c.String(defs.OptionTelemetryJSON)
+	telemetryLevel := c.String(defs.OptionTelemetryLevel)
+	telemetryServerString := c.String(defs.OptionTelemetryServer)
+	telemetryPath := c.String(defs.OptionTelemetryPath)
+	telemetryShare := c.String(defs.OptionTelemetryShare)
+	if c.Bool(defs.OptionShare) || telemetryJSON != "" || telemetryLevel != "" || telemetryServerString != "" || telemetryPath != "" || telemetryShare != "" {
+		if telemetryJSON != "" {
+			b, err := ioutil.ReadFile(telemetryJSON)
 			if err != nil {
-				log.Errorf("Cannot read %s: %s", filename, err)
+				log.Errorf("Cannot read %s: %s", telemetryJSON, err)
 				return err
 			}
 			if err := json.Unmarshal(b, &telemetryServer); err != nil {
@@ -95,31 +100,31 @@ func SpeedTest(c *cli.Context) error {
 			}
 		}
 
-		if str := c.String(defs.OptionTelemetryLevel); str != "" {
-			if str != "disabled" && str != "basic" && str != "full" && str != "debug" {
-				log.Fatalf("Unsupported telemetry level: %s", str)
+		if telemetryLevel != "" {
+			if telemetryLevel != "disabled" && telemetryLevel != "basic" && telemetryLevel != "full" && telemetryLevel != "debug" {
+				log.Fatalf("Unsupported telemetry level: %s", telemetryLevel)
 			}
-			telemetryServer.Level = str
+			telemetryServer.Level = telemetryLevel
 		} else if telemetryServer.Level == "" {
 			telemetryServer.Level = defaultTelemetryLevel
 		}
 
-		if str := c.String(defs.OptionTelemetryServer); str != "" {
-			telemetryServer.Server = str
+		if telemetryServerString != "" {
+			telemetryServer.Server = telemetryServerString
 		} else if telemetryServer.Server == "" {
 			telemetryServer.Server = defaultTelemetryServer
 		}
 
-		if str := c.String(defs.OptionTelemetryPath); str != "" {
-			telemetryServer.Path = str
+		if telemetryPath != "" {
+			telemetryServer.Path = telemetryPath
 		} else if telemetryServer.Path == "" {
 			telemetryServer.Path = defaultTelemetryPath
 		}
 
-		if str := c.String(defs.OptionTelemetryShare); str != "" {
-			telemetryServer.Share = str
+		if telemetryShare != "" {
+			telemetryServer.Share = telemetryShare
 		} else if telemetryServer.Share == "" {
-			telemetryServer.Share = defaultTeleemtryShare
+			telemetryServer.Share = defaultTelemetryShare
 		}
 	}
 
