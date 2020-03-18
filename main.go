@@ -159,28 +159,29 @@ func main() {
 				Name: defs.OptionTelemetryJSON,
 				Usage: "Load telemetry server settings from a JSON file. This\n" +
 					"\toptions overrides --" + defs.OptionTelemetryLevel + ", --" + defs.OptionTelemetryServer + ",\n" +
-					"\t--" + defs.OptionTelemetryPath + ", and --" + defs.OptionTelemetryShare,
+					"\t--" + defs.OptionTelemetryPath + ", and --" + defs.OptionTelemetryShare + ". Implies --" + defs.OptionShare,
 			},
 			&cli.StringFlag{
 				Name: defs.OptionTelemetryLevel,
 				Usage: "Set telemetry data verbosity, available values are:\n" +
-					"\tdisabled, basic, full, debug",
+					"\tdisabled, basic, full, debug. Implies --" + defs.OptionShare,
 			},
 			&cli.StringFlag{
 				Name:  defs.OptionTelemetryServer,
-				Usage: "Set the telemetry server base URL",
+				Usage: "Set the telemetry server base URL. Implies --" + defs.OptionShare,
 			},
 			&cli.StringFlag{
 				Name:  defs.OptionTelemetryPath,
-				Usage: "Set the telemetry upload path",
+				Usage: "Set the telemetry upload path. Implies --" + defs.OptionShare,
 			},
 			&cli.StringFlag{
 				Name:  defs.OptionTelemetryShare,
-				Usage: "Set the telemetry share link path",
+				Usage: "Set the telemetry share link path. Implies --" + defs.OptionShare,
 			},
 			&cli.StringFlag{
-				Name:  defs.OptionTelemetryExtra,
-				Usage: "Send a custom message along with the telemetry results",
+				Name: defs.OptionTelemetryExtra,
+				Usage: "Send a custom message along with the telemetry results.\n" +
+					"\tImplies --" + defs.OptionShare,
 			},
 		},
 	}
