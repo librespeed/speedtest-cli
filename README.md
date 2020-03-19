@@ -27,9 +27,14 @@ This is a command line interface for LibreSpeed speed test backends, written in 
 ## Runtime requirements
 - Any [Go supported platforms](https://github.com/golang/go/wiki/MinimumRequirements)
 
+## Use prebuilt binaries
+
+If you don't want to build `librespeed-cli` yourself, you can find different binaries compiled for various platforms in
+the [releases page](https://github.com/librespeed/speedtest-cli/releases).
+
 ## Building `librespeed-cli`
 
-1. First, you'll have to install Go. For Windows users, [you can download an installer from golang.org](https://golang.org/dl/).
+1. First, you'll have to install Go (at least version 1.11). For Windows users, [you can download an installer from golang.org](https://golang.org/dl/).
 For Linux users, you can use either the archive from golang.org, or install from your distribution's package manager.
 
     For example, Arch Linux:
@@ -56,6 +61,7 @@ can now proceed to build `librespeed-cli` with the build script:
     variables. Run `go tool dist list` to get a list of possible combinations of `GOOS` and `GOARCH`.
     
     ```shell script
+    # If you're using Go version < 1.12, you will need to export GO111MODULE=on
     # Let's say we're building for 64-bit Windows on Linux
     $ GOOS=windows GOARCH=amd64 ./build.sh
     ```
