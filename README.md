@@ -22,7 +22,7 @@ This is a command line interface for LibreSpeed speed test backends, written in 
 [![asciicast](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2.svg)](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2)
 
 ## Requirements for compiling
-- Go 1.14
+- Go 1.14+
 
 ## Runtime requirements
 - Any [Go supported platforms](https://github.com/golang/go/wiki/MinimumRequirements)
@@ -60,8 +60,10 @@ can now proceed to build `librespeed-cli` with the build script:
     If you want to build for another operating system or system architecture, use the `GOOS` and `GOARCH` environment
     variables. Run `go tool dist list` to get a list of possible combinations of `GOOS` and `GOARCH`.
     
+    Note: Technically, the CLI can be compiled with older Go versions that support Go modules, with `GO111MODULE=on`
+    set. If you're compiling with an older Go runtime, you might have to change the Go version in `go.mod`.
+    
     ```shell script
-    # If you're using Go version < 1.12, you will need to export GO111MODULE=on
     # Let's say we're building for 64-bit Windows on Linux
     $ GOOS=windows GOARCH=amd64 ./build.sh
     ```
