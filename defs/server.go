@@ -22,14 +22,17 @@ import (
 
 // Server represents a speed test server
 type Server struct {
-	Name        string       `json:"name"`
-	Server      string       `json:"server"`
-	DownloadURL string       `json:"dlURL"`
-	UploadURL   string       `json:"ulURL"`
-	PingURL     string       `json:"pingURL"`
-	GetIPURL    string       `json:"getIpURL"`
-	ICMPFail    bool         `json:"-"`
-	TLog        TelemetryLog `json:"-"`
+	Name        string `json:"name"`
+	Server      string `json:"server"`
+	DownloadURL string `json:"dlURL"`
+	UploadURL   string `json:"ulURL"`
+	PingURL     string `json:"pingURL"`
+	GetIPURL    string `json:"getIpURL"`
+	SponsorName string `json:"sponsorName"`
+	SponsorURL  string `json:"sponsorURL"`
+
+	ICMPFail bool         `json:"-"`
+	TLog     TelemetryLog `json:"-"`
 }
 
 // IsUp checks the speed test backend is up by accessing the ping URL

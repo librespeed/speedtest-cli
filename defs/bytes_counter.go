@@ -45,7 +45,6 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 	c.total += n
 	c.pos += n
 	if c.pos == uploadSize {
-		c.pos = 0
 		c.resetReader()
 	}
 	c.lock.Unlock()
@@ -63,6 +62,7 @@ func (c *BytesCounter) AvgBytes() float64 {
 	return float64(c.total) / time.Now().Sub(c.start).Seconds()
 }
 
+// AvgMbps returns the average mbits/second
 func (c *BytesCounter) AvgMbps() float64 {
 	var base float64 = 125000
 	if c.mebi {
@@ -71,6 +71,7 @@ func (c *BytesCounter) AvgMbps() float64 {
 	return c.AvgBytes() / base
 }
 
+// AvgHumanize returns the average bytes/kilobytes/megabytes/gigabytes (or bytes/kibibytes/mebibytes/gibibytes) per second
 func (c *BytesCounter) AvgHumanize() string {
 	val := c.AvgBytes()
 
@@ -99,6 +100,7 @@ func (c *BytesCounter) GenerateBlob() {
 
 // resetReader resets the `reader` field to 0 position
 func (c *BytesCounter) resetReader() (int64, error) {
+	c.pos = 0
 	return c.reader.Seek(0, 0)
 }
 

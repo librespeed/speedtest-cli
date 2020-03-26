@@ -8,6 +8,7 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,26 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 
 		log.Infof("Selected server: %s [%s]", currentServer.Name, u.Hostname())
+
+		var sponsorMsg string
+		if currentServer.SponsorName != "" {
+			sponsorMsg += currentServer.SponsorName
+
+			if currentServer.SponsorURL != "" {
+				su, err := url.Parse(currentServer.SponsorURL)
+				if err != nil {
+					log.Debugf("Sponsor URL is invalid: %s", currentServer.SponsorURL)
+				} else {
+					if su.Scheme == "" {
+						su.Scheme = "https"
+					}
+					sponsorMsg += " @ " + su.String()
+				}
+			}
+		}
+		if sponsorMsg != "" {
+			log.Infof("Sponsored by: %s", sponsorMsg)
+		}
 
 		if currentServer.IsUp() {
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
