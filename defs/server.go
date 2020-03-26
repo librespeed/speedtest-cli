@@ -31,8 +31,8 @@ type Server struct {
 	SponsorName string `json:"sponsorName"`
 	SponsorURL  string `json:"sponsorURL"`
 
-	ICMPFail bool         `json:"-"`
-	TLog     TelemetryLog `json:"-"`
+	icmpFailed bool         `json:"-"`
+	TLog       TelemetryLog `json:"-"`
 }
 
 // IsUp checks the speed test backend is up by accessing the ping URL
@@ -62,7 +62,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		s.TLog.Logf("ICMP ping took %s", time.Now().Sub(t).String())
 	}()
 
-	if s.ICMPFail {
+	if s.icmpFailed {
 		log.Debug("ICMP ping failed already, using HTTP ping")
 		return s.PingAndJitter(count + 2)
 	}
@@ -111,7 +111,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	}
 
 	if len(stats.Rtts) == 0 {
-		s.ICMPFail = true
+		s.icmpFailed = true
 		log.Debugf("No ICMP pings returned for server %s (%s), trying TCP ping", s.Name, u.Hostname())
 		return s.PingAndJitter(count + 2)
 	}
