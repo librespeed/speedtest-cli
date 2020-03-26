@@ -424,3 +424,24 @@ func (s *Server) GetURL() (*url.URL, error) {
 	}
 	return u, nil
 }
+
+// Sponsor returns the sponsor's info
+func (s *Server) Sponsor() string {
+	var sponsorMsg string
+	if s.SponsorName != "" {
+		sponsorMsg += s.SponsorName
+
+		if s.SponsorURL != "" {
+			su, err := url.Parse(s.SponsorURL)
+			if err != nil {
+				log.Debugf("Sponsor URL is invalid: %s", s.SponsorURL)
+			} else {
+				if su.Scheme == "" {
+					su.Scheme = "https"
+				}
+				sponsorMsg += " @ " + su.String()
+			}
+		}
+	}
+	return sponsorMsg
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -235,7 +236,11 @@ func SpeedTest(c *cli.Context) error {
 	// if --list is given, list all the servers fetched and exit
 	if c.Bool(defs.OptionList) {
 		for idx, svr := range servers {
-			log.Warnf("%d: %s (%s)", idx, svr.Name, svr.Server)
+			var sponsorMsg string
+			if svr.Sponsor() != "" {
+				sponsorMsg = fmt.Sprintf(" [Sponsor: %s]", svr.Sponsor())
+			}
+			log.Warnf("%d: %s (%s) %s", idx, svr.Name, svr.Server, sponsorMsg)
 		}
 		return nil
 	}
