@@ -22,7 +22,7 @@ import (
 
 const (
 	// serverListUrl is the default remote server JSON URL
-	serverListUrl = `https://librespeed.org/backend-servers/servers.json`
+	serverListUrl = `https://librespeed.org/backend-servers/servers.php`
 
 	defaultTelemetryLevel  = "basic"
 	defaultTelemetryServer = "https://librespeed.org"
