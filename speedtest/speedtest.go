@@ -227,6 +227,11 @@ func SpeedTest(c *cli.Context) error {
 		log.Info("Retrieving server list from %s", serverUrl)
 
 		servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+
+		if err != nil {
+			log.Info("Retry with /.well-known/librespeed")
+			servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl + "/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+		}
 	}
 	if err != nil {
 		log.Errorf("Error when fetching server list: %s", err)
