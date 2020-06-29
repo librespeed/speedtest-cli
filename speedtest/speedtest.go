@@ -230,7 +230,7 @@ func SpeedTest(c *cli.Context) error {
 
 		if err != nil {
 			log.Info("Retry with /.well-known/librespeed")
-			servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl + "/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+			servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl+"/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	}
 	if err != nil {
@@ -347,7 +347,13 @@ func getServerList(forceHTTPS bool, serverList string, excludes, specific []int,
 
 	// getting the server list from remote
 	var servers []defs.Server
-	resp, err := http.DefaultClient.Get(serverList)
+	req, err := http.NewRequest(http.MethodGet, serverList, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", defs.UserAgent)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
