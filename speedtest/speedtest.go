@@ -224,7 +224,7 @@ func SpeedTest(c *cli.Context) error {
 		if str := c.String(defs.OptionServerJSON); str != "" {
 			serverUrl = str
 		}
-		log.Info("Retrieving server list from %s", serverUrl)
+		log.Infof("Retrieving server list from %s", serverUrl)
 
 		servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 
@@ -240,12 +240,12 @@ func SpeedTest(c *cli.Context) error {
 
 	// if --list is given, list all the servers fetched and exit
 	if c.Bool(defs.OptionList) {
-		for idx, svr := range servers {
+		for _, svr := range servers {
 			var sponsorMsg string
 			if svr.Sponsor() != "" {
 				sponsorMsg = fmt.Sprintf(" [Sponsor: %s]", svr.Sponsor())
 			}
-			log.Warnf("%d: %s (%s) %s", idx, svr.Name, svr.Server, sponsorMsg)
+			log.Warnf("%d: %s (%s) %s", svr.ID, svr.Name, svr.Server, sponsorMsg)
 		}
 		return nil
 	}
@@ -415,8 +415,8 @@ func preprocessServers(servers []defs.Server, forceHTTPS bool, excludes, specifi
 		// exclude servers from --exclude
 		if len(excludes) > 0 {
 			var ret []defs.Server
-			for idx, server := range servers {
-				if contains(excludes, idx) {
+			for _, server := range servers {
+				if contains(excludes, server.ID) {
 					continue
 				}
 				ret = append(ret, server)
@@ -428,8 +428,8 @@ func preprocessServers(servers []defs.Server, forceHTTPS bool, excludes, specifi
 		// special value -1 will test all servers
 		if len(specific) > 0 && !contains(specific, -1) {
 			var ret []defs.Server
-			for idx, server := range servers {
-				if contains(specific, idx) {
+			for _, server := range servers {
+				if contains(specific, server.ID) {
 					ret = append(ret, server)
 				}
 			}

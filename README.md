@@ -170,6 +170,7 @@ locally via `--local-json`). The format is as below:
 ```json
 [
   {
+    "id": 1,
     "name": "PHP Backend",
     "server": "https://example.com/",
     "dlURL": "garbage.php",
@@ -178,6 +179,7 @@ locally via `--local-json`). The format is as below:
     "getIpURL": "getIP.php"
   },
   {
+    "id": 2,
     "name": "Go Backend",
     "server": "http://example.com/speedtest/",
     "dlURL": "garbage",
