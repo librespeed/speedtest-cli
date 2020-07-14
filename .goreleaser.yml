@@ -36,7 +36,7 @@ builds:
     - goos: darwin
       goarch: 386
   hooks:
-    post: ./upx.sh
+    post: ./upx.sh -9 "{{ .Path }}"
 archives:
   - format_overrides:
       - goos: windows
