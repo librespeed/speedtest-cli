@@ -45,7 +45,15 @@ func (s *Server) IsUp() bool {
 
 	u, _ := s.GetURL()
 	u.Path = path.Join(u.Path, s.PingURL)
-	resp, err := http.Get(u.String())
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		log.Debugf("Failed when creating HTTP request: %s", err)
+		return false
+	}
+	req.Header.Set("User-Agent", UserAgent)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Debugf("Error checking for server status: %s", err)
 		return false
@@ -120,7 +128,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	return float64(stats.AvgRtt.Milliseconds()), jitter, nil
 }
 
-// ICMPPingAndJitter pings the server via accessing ping URL and calculate the average ping and jitter
+// PingAndJitter pings the server via accessing ping URL and calculate the average ping and jitter
 func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	t := time.Now()
 	defer func() {
@@ -388,6 +396,8 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 		log.Debugf("Failed when creating HTTP request: %s", err)
 		return nil, err
 	}
+	req.Header.Set("User-Agent", UserAgent)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Debugf("Failed when making HTTP request: %s", err)
