@@ -171,9 +171,9 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	}
 
 	var lastPing, jitter float64
-	for idx, ping := range pings {
+	for idx, p := range pings {
 		if idx != 0 {
-			instJitter := math.Abs(lastPing - ping)
+			instJitter := math.Abs(lastPing - p)
 			if idx > 1 {
 				if jitter > instJitter {
 					jitter = jitter*0.7 + instJitter*0.3
@@ -182,7 +182,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 				}
 			}
 		}
-		lastPing = ping
+		lastPing = p
 	}
 
 	return getAvg(pings), jitter, nil
