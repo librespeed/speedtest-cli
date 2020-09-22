@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/go-ping/ping"
 	log "github.com/sirupsen/logrus"
-	"github.com/sparrc/go-ping"
 )
 
 // Server represents a speed test server
@@ -82,12 +82,8 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		return 0, 0, err
 	}
 
-	p, err := ping.NewPinger(u.Hostname(), network)
-	if err != nil {
-		log.Debugf("Failed to initialize pinger: %s", err)
-		return 0, 0, err
-	}
-
+	p := ping.New(u.Hostname())
+	p.SetNetwork(network)
 	p.Count = count
 	p.Timeout = time.Duration(count) * time.Second
 	if srcIp != "" {
