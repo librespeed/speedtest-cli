@@ -185,7 +185,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 }
 
 // Download performs the actual download test
-func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int) (float64, int, error) {
+func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chunks int, duration time.Duration) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Download took %s", time.Now().Sub(t).String())
@@ -210,7 +210,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int) (fl
 		return 0, 0, err
 	}
 	q := req.URL.Query()
-	q.Set("ckSize", strconv.Itoa(downloadChunks))
+	q.Set("ckSize", strconv.Itoa(chunks))
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
@@ -261,7 +261,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int) (fl
 		go doDownload()
 		time.Sleep(200 * time.Millisecond)
 	}
-	timeout := time.After(15 * time.Second)
+	timeout := time.After(duration)
 Loop:
 	for {
 		select {
@@ -277,7 +277,7 @@ Loop:
 }
 
 // Upload performs the actual upload test
-func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int) (float64, int, error) {
+func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int, uploadSize int, duration time.Duration) (float64, int, error) {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Upload took %s", time.Now().Sub(t).String())
@@ -285,6 +285,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 	counter := NewCounter()
 	counter.SetMebi(useMebi)
+	counter.SetUploadSize(uploadSize)
 
 	if noPrealloc {
 		log.Info("Pre-allocation is disabled, performance might be lower!")
@@ -353,7 +354,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		go doUpload()
 		time.Sleep(200 * time.Millisecond)
 	}
-	timeout := time.After(15 * time.Second)
+	timeout := time.After(duration)
 Loop:
 	for {
 		select {

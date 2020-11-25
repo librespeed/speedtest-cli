@@ -1,12 +1,5 @@
 package defs
 
-const (
-	// chunks to download in download test
-	downloadChunks = 100
-	// payload size per upload request
-	uploadSize = 1024 * 1024
-)
-
 var (
 	// values to be filled in by build script
 	BuildDate   string

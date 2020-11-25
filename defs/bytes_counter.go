@@ -12,12 +12,13 @@ import (
 
 // BytesCounter implements io.Reader and io.Writer interface, for counting bytes being read/written in HTTP requests
 type BytesCounter struct {
-	start   time.Time
-	pos     int
-	total   int
-	payload []byte
-	reader  io.ReadSeeker
-	mebi    bool
+	start      time.Time
+	pos        int
+	total      int
+	payload    []byte
+	reader     io.ReadSeeker
+	mebi       bool
+	uploadSize int
 
 	lock *sync.Mutex
 }
@@ -44,7 +45,7 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 	c.lock.Lock()
 	c.total += n
 	c.pos += n
-	if c.pos == uploadSize {
+	if c.pos == c.uploadSize {
 		c.resetReader()
 	}
 	c.lock.Unlock()
@@ -55,6 +56,11 @@ func (c *BytesCounter) Read(p []byte) (int, error) {
 // SetBase sets the base for dividing bytes into megabyte or mebibyte
 func (c *BytesCounter) SetMebi(mebi bool) {
 	c.mebi = mebi
+}
+
+// SetUploadSize sets the size of payload being uploaded
+func (c *BytesCounter) SetUploadSize(uploadSize int) {
+	c.uploadSize = uploadSize * 1024
 }
 
 // AvgBytes returns the average bytes/second
@@ -94,7 +100,7 @@ func (c *BytesCounter) AvgHumanize() string {
 // GenerateBlob generates a random byte array of `uploadSize` in the `payload` field, and sets the `reader` field to
 // read from it
 func (c *BytesCounter) GenerateBlob() {
-	c.payload = getRandomData(uploadSize)
+	c.payload = getRandomData(c.uploadSize)
 	c.reader = bytes.NewReader(c.payload)
 }
 

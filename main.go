@@ -135,8 +135,23 @@ func main() {
 			},
 			&cli.IntFlag{
 				Name:  defs.OptionTimeout,
-				Usage: "HTTP `TIMEOUT` in seconds.",
+				Usage: "HTTP `TIMEOUT` in seconds",
 				Value: 15,
+			},
+			&cli.IntFlag{
+				Name:  defs.OptionDuration,
+				Usage: "Upload and download test duration in seconds",
+				Value: 15,
+			},
+			&cli.IntFlag{
+				Name:  defs.OptionChunks,
+				Usage: "Chunks to download from server, chunk size depends on server configuration",
+				Value: 100,
+			},
+			&cli.IntFlag{
+				Name:  defs.OptionUploadSize,
+				Usage: "Size of payload being uploaded in KiB",
+				Value: 1024,
 			},
 			&cli.BoolFlag{
 				Name: defs.OptionSecure,
