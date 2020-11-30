@@ -194,7 +194,7 @@ As you can see in the example, all servers have their schemes defined. In case o
 `librespeed-cli` will use `http` by default, or `https` when the `--secure` option is enabled.
 
 ## Use a custom telemetry server
-By default, the telemetry result will be sent to `librespeed.org` by default. You can also customize your telemetry settings 
+By default, the telemetry result will be sent to `librespeed.org`. You can also customize your telemetry settings 
 via the `--telemetry` prefixed options. In order to load a custom telemetry endpoint configuration, you'll have to use the
 `--telemetry-json` option to specify a local JSON file containing the configuration bits. The format is as below:
 
