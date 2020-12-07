@@ -159,6 +159,10 @@ func main() {
 					"\tLibreSpeed.org operated servers",
 			},
 			&cli.BoolFlag{
+				Name:  defs.OptionSkipCertVerify,
+				Usage: "Skip verifying SSL certificate for HTTPS connections (self-signed certs)",
+			},
+			&cli.BoolFlag{
 				Name: defs.OptionNoPreAllocate,
 				Usage: "Do not pre allocate upload data. Pre allocation is\n" +
 					"\tenabled by default to improve upload performance. To\n" +

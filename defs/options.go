@@ -28,6 +28,7 @@ const (
 	OptionUploadSize      = "upload-size"
 	OptionDuration        = "duration"
 	OptionSecure          = "secure"
+	OptionSkipCertVerify  = "skip-cert-verify"
 	OptionNoPreAllocate   = "no-pre-allocate"
 	OptionVersion         = "version"
 	OptionLocalJSON       = "local-json"
