@@ -151,19 +151,8 @@ func SpeedTest(c *cli.Context) error {
 		network = "ip"
 	}
 
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify)},
-	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify)}
 
 	// bind to source IP address if given, or if ipv4/ipv6 is forced
 	if src := c.String(defs.OptionSource); src != "" || (forceIPv4 || forceIPv6) {
