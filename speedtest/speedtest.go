@@ -262,7 +262,7 @@ func SpeedTest(c *cli.Context) error {
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
-			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network)
+			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network, c.Bool(defs.OptionNoICMP))
 		}
 
 		// send ping jobs to workers
@@ -303,7 +303,7 @@ func SpeedTest(c *cli.Context) error {
 	}
 }
 
-func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string) {
+func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string, noICMP bool) {
 	for {
 		job := <-jobs
 		server := job.Server
@@ -317,6 +317,9 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 
 		// check the server is up by accessing the ping URL and checking its returned value == empty and status code == 200
 		if server.IsUp() {
+			// skip ICMP if option given
+			server.NoICMP = noICMP
+
 			// if server is up, get ping
 			ping, _, err := server.ICMPPingAndJitter(1, srcIp, network)
 			if err != nil {

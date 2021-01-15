@@ -8,6 +8,7 @@ const (
 	OptionIPv6Alt         = "6"
 	OptionNoDownload      = "no-download"
 	OptionNoUpload        = "no-upload"
+	OptionNoICMP          = "no-icmp"
 	OptionConcurrent      = "concurrent"
 	OptionBytes           = "bytes"
 	OptionMebiBytes       = "mebibytes"

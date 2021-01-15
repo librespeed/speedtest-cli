@@ -65,6 +65,9 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				pb.Start()
 			}
 
+			// skip ICMP if option given
+			currentServer.NoICMP = c.Bool(defs.OptionNoICMP)
+
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {
 				log.Errorf("Failed to get ping and jitter: %s", err)

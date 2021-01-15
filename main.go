@@ -56,6 +56,11 @@ func main() {
 				Name:  defs.OptionNoUpload,
 				Usage: "Do not perform upload test",
 			},
+			&cli.BoolFlag{
+				Name: defs.OptionNoICMP,
+				Usage: "Do not use ICMP ping. ICMP doesn't work well under Linux\n" +
+					"at this moment, so you might want to disable it",
+			},
 			&cli.IntFlag{
 				Name:  defs.OptionConcurrent,
 				Usage: "Concurrent HTTP requests being made",
