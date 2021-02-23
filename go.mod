@@ -1,4 +1,4 @@
-module librespeed-cli
+module github.com/librespeed/librespeed-cli
 
 go 1.14
 
