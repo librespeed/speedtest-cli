@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -211,9 +213,16 @@ func SpeedTest(c *cli.Context) error {
 	var servers []defs.Server
 	var err error
 	if str := c.String(defs.OptionLocalJSON); str != "" {
-		// load server list from local JSON file
-		log.Infof("Using local JSON server list: %s", str)
-		servers, err = getLocalServers(c.Bool(defs.OptionSecure), str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+		switch str {
+		case "-":
+			// load server list from stdin
+			log.Info("Using local JSON server list from stdin")
+			servers, err = getLocalServersReader(c.Bool(defs.OptionSecure), os.Stdin, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+		default:
+			// load server list from local JSON file
+			log.Infof("Using local JSON server list: %s", str)
+			servers, err = getLocalServers(c.Bool(defs.OptionSecure), str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+		}
 	} else {
 		// fetch the server list JSON and parse it into the `servers` array
 		serverUrl := serverListUrl
@@ -370,10 +379,13 @@ func getServerList(forceHTTPS bool, serverList string, excludes, specific []int,
 	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
 }
 
-// getLocalServers loads the server JSON from a local file
-func getLocalServers(forceHTTPS bool, jsonFile string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+// getLocalServersReader loads the server JSON from an io.Reader
+func getLocalServersReader(forceHTTPS bool, reader io.ReadCloser, excludes, specific []int, filter bool) ([]defs.Server, error) {
+	defer reader.Close()
+
 	var servers []defs.Server
-	b, err := ioutil.ReadFile(jsonFile)
+
+	b, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +395,15 @@ func getLocalServers(forceHTTPS bool, jsonFile string, excludes, specific []int,
 	}
 
 	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
+}
+
+// getLocalServers loads the server JSON from a local file
+func getLocalServers(forceHTTPS bool, jsonFile string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+	f, err := os.OpenFile(jsonFile, os.O_RDONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	return getLocalServersReader(forceHTTPS, f, excludes, specific, filter)
 }
 
 // preprocessServers makes some needed modifications to the servers fetched

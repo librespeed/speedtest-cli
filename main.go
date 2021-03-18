@@ -131,8 +131,9 @@ func main() {
 				Usage: "Use an alternative server list from remote JSON file",
 			},
 			&cli.StringFlag{
-				Name:  defs.OptionLocalJSON,
-				Usage: "Use an alternative server list from local JSON file",
+				Name: defs.OptionLocalJSON,
+				Usage: "Use an alternative server list from local JSON file,\n" +
+					"\tor read from stdin with \"--" + defs.OptionLocalJSON + " -\".",
 			},
 			&cli.StringFlag{
 				Name:  defs.OptionSource,
