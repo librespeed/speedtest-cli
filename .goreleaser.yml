@@ -5,6 +5,7 @@ before:
     - go mod download
 builds:
 - main: ./main.go
+  id: upx
   env:
   - CGO_ENABLED=0
   flags:
@@ -12,7 +13,6 @@ builds:
   ldflags:
     - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
   goos:
-    - windows
     - linux
     - darwin
     - freebsd
@@ -35,8 +35,30 @@ builds:
   ignore:
     - goos: darwin
       goarch: 386
+    - goos: darwin
+      goarch: arm64
   hooks:
     post: ./upx.sh -9 "{{ .Path }}"
+- main: ./main.go
+  id: no-upx
+  env:
+    - CGO_ENABLED=0
+  flags:
+    - -trimpath
+  ldflags:
+    - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
+  goos:
+    - windows
+    - darwin
+  goarch:
+    - 386
+    - amd64
+    - arm64
+  ignore:
+    - goos: darwin
+      goarch: 386
+    - goos: darwin
+      goarch: amd64
 archives:
   - format_overrides:
       - goos: windows
@@ -48,19 +70,6 @@ checksum:
 changelog:
   skip: false
   sort: asc
-brews:
-  - github:
-      owner: librespeed
-      name: homebrew-tap
-    commit_author:
-      name: "Maddie Zhan"
-      email: maddie.zhan@gmail.com
-    folder: Formula
-    homepage: "https://github.com/librespeed/speedtest-cli"
-    description: "Command-line client for LibreSpeed"
-    skip_upload: true
-    custom_block: |
-      head "https://github.com/librespeed/speedtest-cli.git"
 release:
   github:
     owner: librespeed
