@@ -29,7 +29,7 @@ func main() {
 	// define cli options
 	app := &cli.App{
 		Name:     "librespeed-cli",
-		Usage:    "Test your Internet speed with LibreSpeed 🚀",
+		Usage:    "Test your Internet speed with LibreSpeed",
 		Action:   speedtest.SpeedTest,
 		HideHelp: true,
 		Flags: []cli.Flag{
