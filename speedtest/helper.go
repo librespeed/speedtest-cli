@@ -121,7 +121,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 			// print share link if --share is given
 			var shareLink string
-			if !c.Bool(defs.OptionCSV) && telemetryServer.GetLevel() > 0 {
+			if telemetryServer.GetLevel() > 0 {
 				var extra defs.TelemetryExtra
 				extra.ServerName = currentServer.Name
 				extra.Extra = c.String(defs.OptionTelemetryExtra)
@@ -130,7 +130,10 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					log.Errorf("Error when sending telemetry data: %s", err)
 				} else {
 					shareLink = link
-					log.Warnf("Share your result: %s", link)
+					// only print to stdout when --json and --csv are not used
+					if !c.Bool(defs.OptionJSON) && !c.Bool(defs.OptionCSV) {
+						log.Warnf("Share your result: %s", link)
+					}
 				}
 			}
 
