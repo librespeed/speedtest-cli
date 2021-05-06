@@ -263,8 +263,8 @@ func SpeedTest(c *cli.Context) error {
 		log.Info("Selecting the fastest server based on ping")
 
 		var wg sync.WaitGroup
-		jobs := make(chan PingJob, 10)
-		results := make(chan PingResult, 10)
+		jobs := make(chan PingJob, len(servers))
+		results := make(chan PingResult, len(servers))
 		done := make(chan struct{})
 
 		pingList := make(map[int]float64)
