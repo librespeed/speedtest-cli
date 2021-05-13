@@ -60,8 +60,11 @@ func (s *Server) IsUp() bool {
 	}
 	defer resp.Body.Close()
 	b, _ := ioutil.ReadAll(resp.Body)
+	if len(b) > 0 {
+		log.Debugf("Failed when parsing get IP result: %s", b)
+	}
 	// only return online if the ping URL returns nothing and 200
-	return len(b) == 0 && resp.StatusCode == http.StatusOK
+	return resp.StatusCode == http.StatusOK
 }
 
 // ICMPPingAndJitter pings the server via ICMP echos and calculate the average ping and jitter
@@ -412,6 +415,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			log.Debugf("Failed when parsing get IP result: %s", err)
 			log.Debugf("Received payload: %s", b)
+			ipInfo.ProcessedString = string(b[:])
 		}
 	}
 
