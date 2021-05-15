@@ -32,6 +32,9 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		log.Infof("Testing against %d servers", serverCount)
 	}
 
+	var reps_json []report.JSONReport
+	var reps_csv []report.CSVReport
+
 	// fetch current user's IP info
 	for _, currentServer := range servers {
 		// get telemetry level
@@ -140,8 +143,6 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			// check for --csv or --json. the program prioritize the --csv before the --json. this is the same behavior as speedtest-cli
 			if c.Bool(defs.OptionCSV) {
 				// print csv if --csv is given
-				var reps []report.CSVReport
-
 				var rep report.CSVReport
 				rep.Timestamp = time.Now()
 
@@ -154,14 +155,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Share = shareLink
 				rep.IP = ispInfo.RawISPInfo.IP
 
-				reps = append(reps, rep)
-
-				var buf bytes.Buffer
-				if err := gocsv.MarshalWithoutHeaders(&reps, &buf); err != nil {
-					log.Errorf("Error generating CSV report: %s", err)
-				} else {
-					log.Warn(buf.String())
-				}
+				reps_csv = append(reps_csv, rep)
 			} else if c.Bool(defs.OptionJSON) {
 				// print json if --json is given
 				var rep report.JSONReport
@@ -180,20 +174,32 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				rep.Client = report.Client{ispInfo.RawISPInfo}
 				rep.Client.Readme = ""
-
-				if b, err := json.Marshal(&rep); err != nil {
-					log.Errorf("Error generating JSON report: %s", err)
-				} else {
-					log.Warnf("%s", b)
-				}
+				
+				reps_json = append(reps_json,rep)
 			}
 		} else {
 			log.Infof("Selected server %s (%s) is not responding at the moment, try again later", currentServer.Name, u.Hostname())
 		}
 
-		// add a new line after each test if testing multiple servers
-		if len(servers) > 1 {
+		//add a new line after each test if testing multiple servers
+		if ( len(servers) > 1 &&  !silent){
 			log.Warn()
+		}
+	}
+
+	// check for --csv or --json. the program prioritize the --csv before the --json. this is the same behavior as speedtest-cli
+	if c.Bool(defs.OptionCSV) {
+		var buf bytes.Buffer
+		if err := gocsv.MarshalWithoutHeaders(&reps_csv, &buf); err != nil {
+			log.Errorf("Error generating CSV report: %s", err)
+		} else {
+			log.Warn(buf.String())
+		}
+	} else if c.Bool(defs.OptionJSON) {
+		if b, err := json.Marshal(&reps_json); err != nil {
+			log.Errorf("Error generating JSON report: %s", err)
+		} else {
+			log.Warnf("%s", b)
 		}
 	}
 
