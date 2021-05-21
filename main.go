@@ -6,8 +6,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 
-	"github.com/librespeed/librespeed-cli/defs"
-	"github.com/librespeed/librespeed-cli/speedtest"
+	"github.com/librespeed/speedtest-cli/defs"
+	"github.com/librespeed/speedtest-cli/speedtest"
 )
 
 // init sets up the essential bits on start up
