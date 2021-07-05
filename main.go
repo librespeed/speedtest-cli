@@ -20,7 +20,7 @@ func init() {
 	// warn level is for suppress modes
 	// error level is for errors
 
-	log.SetOutput(os.Stdout)
+	log.SetOutput(os.Stderr)
 	log.SetFormatter(formatter)
 	log.SetLevel(log.InfoLevel)
 }
