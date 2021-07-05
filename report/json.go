@@ -3,7 +3,7 @@ package report
 import (
 	"time"
 
-	"librespeed-cli/defs"
+	"github.com/librespeed/speedtest-cli/defs"
 )
 
 // JSONReport represents the output data fields in a JSON file
