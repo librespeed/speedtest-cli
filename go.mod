@@ -1,4 +1,4 @@
-module librespeed-cli
+module github.com/librespeed/speedtest-cli
 
 go 1.14
 
