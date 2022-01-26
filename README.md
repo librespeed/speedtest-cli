@@ -197,7 +197,7 @@ locally via `--local-json`). The format is as below:
 ]
 ```
 
-The `--local-json` can also be involved via stdin like:
+The `--local-json` option can also read from `stdin`:
 
 `echo '[{"id": 1,"name": "a","server": "https://speedtest.example.com/","dlURL": "garbage.php","ulURL": "empty.php","pingURL": "empty.php","getIpURL": "getIP.php"}]' | librespeed-cli --local-json - `
 
