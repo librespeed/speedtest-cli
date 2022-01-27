@@ -59,7 +59,7 @@ func main() {
 			&cli.BoolFlag{
 				Name: defs.OptionNoICMP,
 				Usage: "Do not use ICMP ping. ICMP doesn't work well under Linux\n" +
-					"at this moment, so you might want to disable it",
+					"\tat this moment, so you might want to disable it",
 			},
 			&cli.IntFlag{
 				Name:  defs.OptionConcurrent,
@@ -110,7 +110,7 @@ func main() {
 				Name: defs.OptionJSON,
 				Usage: "Suppress verbose output, only show basic information\n" +
 					"\tin JSON format. Speeds listed in bit/s and not\n" +
-					"\t affected by --bytes",
+					"\taffected by --bytes",
 			},
 			&cli.BoolFlag{
 				Name:  defs.OptionList,
@@ -141,7 +141,7 @@ func main() {
 			},
 			&cli.IntFlag{
 				Name:  defs.OptionTimeout,
-				Usage: "HTTP `TIMEOUT` in seconds",
+				Usage: "HTTP `TIMEOUT` in seconds.",
 				Value: 15,
 			},
 			&cli.IntFlag{
