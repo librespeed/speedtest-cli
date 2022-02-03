@@ -64,6 +64,7 @@ func SpeedTest(c *cli.Context) error {
 
 	// print version
 	if c.Bool(defs.OptionVersion) {
+		log.SetOutput(os.Stdout)
 		log.Warnf("%s %s (built on %s)", defs.ProgName, defs.ProgVersion, defs.BuildDate)
 		log.Warn("https://github.com/librespeed/speedtest-cli")
 		log.Warn("Licensed under GNU Lesser General Public License v3.0")
@@ -80,7 +81,7 @@ func SpeedTest(c *cli.Context) error {
 	if c.Bool(defs.OptionCSVHeader) {
 		var rep []report.CSVReport
 		b, _ := gocsv.MarshalBytes(&rep)
-		log.Warnf("%s", b)
+		os.Stdout.WriteString(string(b))
 		return nil
 	}
 
