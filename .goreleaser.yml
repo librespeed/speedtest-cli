@@ -21,17 +21,10 @@ builds:
     - amd64
     - arm
     - arm64
-    - mips
-    - mipsle
-    - mips64
-    - mips64le
   goarm:
     - 5
     - 6
     - 7
-  gomips:
-    - hardfloat
-    - softfloat
   ignore:
     - goos: darwin
       goarch: 386
@@ -48,13 +41,27 @@ builds:
   ldflags:
     - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
   goos:
+    - linux
     - windows
     - darwin
   goarch:
     - 386
     - amd64
     - arm64
+    - mips
+    - mipsle
+    - mips64
+    - mips64le
+  gomips:
+    - hardfloat
+    - softfloat
   ignore:
+    - goos: linux
+      goarch: 386
+    - goos: linux
+      goarch: amd64
+    - goos: linux
+      goarch: arm64
     - goos: darwin
       goarch: 386
     - goos: darwin
