@@ -42,7 +42,7 @@ For Linux users, you can use either the archive from golang.org, or install from
     ```shell script
     # pacman -S go
     ```
-   
+
 2. Then, clone the repository:
 
     ```shell script
@@ -59,10 +59,10 @@ can now proceed to build `librespeed-cli` with the build script:
 
     If you want to build for another operating system or system architecture, use the `GOOS` and `GOARCH` environment
     variables. Run `go tool dist list` to get a list of possible combinations of `GOOS` and `GOARCH`.
-    
+
     Note: Technically, the CLI can be compiled with older Go versions that support Go modules, with `GO111MODULE=on`
     set. If you're compiling with an older Go runtime, you might have to change the Go version in `go.mod`.
-    
+
     ```shell script
     # Let's say we're building for 64-bit Windows on Linux
     $ GOOS=windows GOARCH=amd64 ./build.sh
@@ -74,7 +74,7 @@ can now proceed to build `librespeed-cli` with the build script:
     $ ls out
     librespeed-cli-windows-amd64.exe
     ```
-   
+
 5. Now you can use the `librespeed-cli` and test your Internet speed!
 
 ## Install from AUR
@@ -145,7 +145,7 @@ GLOBAL OPTIONS:
                                   multiple times. Cannot be used with --server
    --server-json value            Use an alternative server list from remote JSON file
    --local-json value             Use an alternative server list from local JSON file,
-                                  or read from stdin with "--local-json -".   
+                                  or read from stdin with "--local-json -".
    --source SOURCE                SOURCE IP address to bind to
    --timeout TIMEOUT              HTTP TIMEOUT in seconds. (default: 15)
    --duration value               Upload and download test duration in seconds (default: 15)
@@ -153,7 +153,7 @@ GLOBAL OPTIONS:
    --upload-size value            Size of payload being uploaded in KiB (default: 1024)
    --secure                       Use HTTPS instead of HTTP when communicating with
                                   LibreSpeed.org operated servers (default: false)
-   --skip-cert-verify             Skip verifying SSL certificate for HTTPS connections (self-signed certs) (default: false)								  
+   --skip-cert-verify             Skip verifying SSL certificate for HTTPS connections (self-signed certs) (default: false)
    --no-pre-allocate              Do not pre allocate upload data. Pre allocation is
                                   enabled by default to improve upload performance. To
                                   support systems with insufficient memory, use this
@@ -205,7 +205,7 @@ As you can see in the example, all servers have their schemes defined. In case o
 `librespeed-cli` will use `http` by default, or `https` when the `--secure` option is enabled.
 
 ## Use a custom telemetry server
-By default, the telemetry result will be sent to `librespeed.org`. You can also customize your telemetry settings 
+By default, the telemetry result will be sent to `librespeed.org`. You can also customize your telemetry settings
 via the `--telemetry` prefixed options. In order to load a custom telemetry endpoint configuration, you'll have to use the
 `--telemetry-json` option to specify a local JSON file containing the configuration bits. The format is as below:
 

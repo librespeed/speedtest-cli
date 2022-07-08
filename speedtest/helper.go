@@ -79,7 +79,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			}
 
 			if pb != nil {
-				pb.FinalMSG = fmt.Sprintf("Ping: %.0f ms\tJitter: %.0f ms\n", p, jitter)
+				pb.FinalMSG = fmt.Sprintf("Ping: %.2f ms\tJitter: %.2f ms\n", p, jitter)
 				pb.Stop()
 			}
 
@@ -117,9 +117,9 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			if c.Bool(defs.OptionSimple) {
 				if c.Bool(defs.OptionBytes) {
 					useMebi := c.Bool(defs.OptionMebiBytes)
-					log.Warnf("Ping:\t%.0f ms\tJitter:\t%.0f ms\nDownload rate:\t%s\nUpload rate:\t%s", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
+					log.Warnf("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%s\nUpload rate:\t%s", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
 				} else {
-					log.Warnf("Ping:\t%.0f ms\tJitter:\t%.0f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps", p, jitter, downloadValue, uploadValue)
+					log.Warnf("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps", p, jitter, downloadValue, uploadValue)
 				}
 			}
 
@@ -149,7 +149,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				rep.Name = currentServer.Name
 				rep.Address = u.String()
-				rep.Ping = p
+				rep.Ping = math.Round(p*100) / 100
 				rep.Jitter = math.Round(jitter*100) / 100
 				rep.Download = math.Round(downloadValue*100) / 100
 				rep.Upload = math.Round(uploadValue*100) / 100
@@ -162,7 +162,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				var rep report.JSONReport
 				rep.Timestamp = time.Now()
 
-				rep.Ping = p
+				rep.Ping = math.Round(p*100) / 100
 				rep.Jitter = math.Round(jitter*100) / 100
 				rep.Download = math.Round(downloadValue*100) / 100
 				rep.Upload = math.Round(uploadValue*100) / 100
@@ -175,15 +175,15 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				rep.Client = report.Client{ispInfo.RawISPInfo}
 				rep.Client.Readme = ""
-				
-				reps_json = append(reps_json,rep)
+
+				reps_json = append(reps_json, rep)
 			}
 		} else {
 			log.Infof("Selected server %s (%s) is not responding at the moment, try again later", currentServer.Name, u.Hostname())
 		}
 
 		//add a new line after each test if testing multiple servers
-		if ( len(servers) > 1 &&  !silent){
+		if len(servers) > 1 && !silent {
 			log.Warn()
 		}
 	}
@@ -240,7 +240,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	if fPing, err := wr.CreateFormField("ping"); err != nil {
 		log.Debugf("Error creating form field: %s", err)
 		return "", err
-	} else if _, err = fPing.Write([]byte(strconv.Itoa(int(pingVal)))); err != nil {
+	} else if _, err = fPing.Write([]byte(strconv.FormatFloat(pingVal, 'f', 2, 64))); err != nil {
 		log.Debugf("Error writing form field: %s", err)
 		return "", err
 	}
@@ -248,7 +248,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	if fJitter, err := wr.CreateFormField("jitter"); err != nil {
 		log.Debugf("Error creating form field: %s", err)
 		return "", err
-	} else if _, err = fJitter.Write([]byte(strconv.Itoa(int(jitter)))); err != nil {
+	} else if _, err = fJitter.Write([]byte(strconv.FormatFloat(jitter, 'f', 2, 64))); err != nil {
 		log.Debugf("Error writing form field: %s", err)
 		return "", err
 	}
