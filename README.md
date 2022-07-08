@@ -97,6 +97,26 @@ $ makepkg -si
 
 See the [librespeed-cli Homebrew tap](https://github.com/librespeed/homebrew-tap#setup).
 
+## Container Image
+
+You can run `librespeed-cli` in a container.
+
+1. Build the container image:
+
+    ```shell script
+    docker build -t librespeed-cli:latest .
+    ```
+
+2. Run the container:
+
+    ```shell script
+    docker run --rm --name librespeed-cli librespeed-cli:latest
+    # With options
+    docker run --rm --name librespeed-cli librespeed-cli:latest --telemetry-level disabled --no-upload
+    # To avoid "Failed to ping target host: socket: permission denied" errors when using --verbose
+    docker run --rm --name librespeed-cli --sysctl net.ipv4.ping_group_range="0 2147483647" librespeed-cli:latest --verbose
+    ```
+
 ## Usage
 
 You can see the full list of supported options with `librespeed-cli -h`:
