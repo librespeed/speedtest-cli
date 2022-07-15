@@ -1,7 +1,7 @@
 ![LibreSpeed Logo](https://github.com/librespeed/speedtest/blob/master/.logo/logo3.png?raw=true)
 
 # LibreSpeed command line tool
-Don't have a GUI but wants to use LibreSpeed servers to test your Internet speed? 🚀
+Don't have a GUI but want to use LibreSpeed servers to test your Internet speed? 🚀
 
 `librespeed-cli` comes to rescue!
 
@@ -96,6 +96,20 @@ $ makepkg -si
 ## Install from Homebrew
 
 See the [librespeed-cli Homebrew tap](https://github.com/librespeed/homebrew-tap#setup).
+
+## Install on Windows
+
+If you have either [Scoop](https://scoop.sh/) or [Chocolatey](https://chocolatey.org/) installed you can use one of the following commands:
+
+- Scoop (ensure you have the `extras` bucket added):
+  ```
+  > scoop install librespeed-cli
+  ```
+
+- Chocolatey:
+  ```
+  > choco install librespeed-cli
+  ```
 
 ## Container Image
 
