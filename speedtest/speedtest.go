@@ -454,6 +454,10 @@ func preprocessServers(servers []defs.Server, forceHTTPS bool, excludes, specifi
 					ret = append(ret, server)
 				}
 			}
+			if len(ret) == 0 {
+				error_message := fmt.Sprintf("specified server(s) not found: %v", specific)
+				return nil, errors.New(error_message)
+			}
 			return ret, nil
 		}
 	}
