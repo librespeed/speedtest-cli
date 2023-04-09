@@ -6,7 +6,7 @@ import (
 	"github.com/librespeed/speedtest-cli/defs"
 )
 
-// JSONReport represents the output data fields in a JSON file
+// Report represents the output data fields in a nestable file data such as JSON.
 type Report struct {
 	Timestamp     time.Time `json:"timestamp"`
 	Server        Server    `json:"server"`
@@ -20,6 +20,7 @@ type Report struct {
 	Share         string    `json:"share"`
 }
 
+// FlatReport represents the output data fields in a flat file data such as CSV.
 type FlatReport struct {
 	Timestamp time.Time `csv:"Timestamp"`
 	Name      string    `csv:"Server Name"`
