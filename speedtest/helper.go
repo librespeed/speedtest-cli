@@ -8,7 +8,6 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -170,21 +169,21 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 	// check for --csv or --json. the program prioritize the --csv before the --json. this is the same behavior as speedtest-cli
 	if c.Bool(defs.OptionCSV) {
-		var buf bytes.Buffer
 		var reps_csv []report.FlatReport
 		for _, rep := range reps {
 			reps_csv = append(reps_csv, rep.GetFlatReport())
 		}
-		if err := gocsv.MarshalWithoutHeaders(&reps_csv, &buf); err != nil {
+		if resultStrig, err := gocsv.MarshalStringWithoutHeaders(&reps_csv); err != nil {
 			log.Errorf("Error generating CSV report: %s", err)
 		} else {
-			os.Stdout.WriteString(buf.String())
+			fmt.Println("MarshalStringWithoutHeaders")
+			fmt.Print(resultStrig)
 		}
 	} else if c.Bool(defs.OptionJSON) {
-		if b, err := json.Marshal(&reps); err != nil {
+		if jsonBytes, err := json.Marshal(&reps); err != nil {
 			log.Errorf("Error generating JSON report: %s", err)
 		} else {
-			os.Stdout.Write(b[:])
+			fmt.Println(string(jsonBytes))
 		}
 	}
 
