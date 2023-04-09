@@ -79,7 +79,7 @@ func SpeedTest(c *cli.Context) error {
 
 	// if --csv-header is given, print the header and exit (same behavior speedtest-cli)
 	if c.Bool(defs.OptionCSVHeader) {
-		var rep []report.CSVReport
+		var rep []report.FlatReport
 		b, _ := gocsv.MarshalBytes(&rep)
 		os.Stdout.WriteString(string(b))
 		return nil
