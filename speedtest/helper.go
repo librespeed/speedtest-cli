@@ -176,7 +176,6 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		if resultStrig, err := gocsv.MarshalStringWithoutHeaders(&reps_csv); err != nil {
 			log.Errorf("Error generating CSV report: %s", err)
 		} else {
-			fmt.Println("MarshalStringWithoutHeaders")
 			fmt.Print(resultStrig)
 		}
 	} else if c.Bool(defs.OptionJSON) {

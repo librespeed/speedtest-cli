@@ -45,8 +45,8 @@ type Client struct {
 
 func (r Report) GetFlatReport() FlatReport {
 	var rep FlatReport
-	rep.Timestamp = time.Now()
 
+	rep.Timestamp = r.Timestamp
 	rep.Name = r.Server.Name
 	rep.Address = r.Server.URL
 	rep.Ping = r.Ping
