@@ -1,4 +1,6 @@
-FROM golang:1.17.7-buster as builder
+FROM golang:1.20.3-alpine as builder
+
+RUN apk add --no-cache bash 
 
 # Set working directory
 WORKDIR /usr/src/librespeed-cli
@@ -9,9 +11,9 @@ COPY . .
 # Build librespeed-cli
 RUN ./build.sh
 
-FROM golang:1.17.7-buster
+FROM alpine:3.17
 
 # Copy librespeed-cli binary
-COPY --from=builder /usr/src/librespeed-cli/out/librespeed-cli* /usr/src/librespeed-cli/librespeed-cli
+COPY --from=builder /usr/src/librespeed-cli/out/librespeed-cli* /bin/librespeed-cli
 
-ENTRYPOINT ["/usr/src/librespeed-cli/librespeed-cli"]
+CMD ["/bin/librespeed-cli"]
