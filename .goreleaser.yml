@@ -1,72 +1,72 @@
-project_name: 'librespeed-cli'
+project_name: "librespeed-cli"
 #dist: ./out
 before:
   hooks:
     - go mod download
 builds:
-- main: ./main.go
-  id: upx
-  env:
-  - CGO_ENABLED=0
-  flags:
-    - -trimpath
-  ldflags:
-    - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
-  goos:
-    - linux
-    - darwin
-    - freebsd
-  goarch:
-    - '386'
-    - amd64
-    - arm
-    - arm64
-  goarm:
-    - "5"
-    - "6"
-    - "7"
-  ignore:
-    - goos: darwin
-      goarch: "386"
-    - goos: darwin
-      goarch: arm64
-  hooks:
-    post: 
-      - ./upx.sh -9 "{{ .Path }}"
-- main: ./main.go
-  id: no-upx
-  env:
-    - CGO_ENABLED=0
-  flags:
-    - -trimpath
-  ldflags:
-    - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
-  goos:
-    - linux
-    - windows
-    - darwin
-  goarch:
-    - "386"
-    - amd64
-    - arm64
-    - mips
-    - mipsle
-    - mips64
-    - mips64le
-  gomips:
-    - hardfloat
-    - softfloat
-  ignore:
-    - goos: linux
-      goarch: "386"
-    - goos: linux
-      goarch: amd64
-    - goos: linux
-      goarch: arm64
-    - goos: darwin
-      goarch: "386"
-    - goos: darwin
-      goarch: amd64
+  - main: ./main.go
+    id: upx
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
+    goos:
+      - linux
+      - darwin
+      - freebsd
+    goarch:
+      - "386"
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "5"
+      - "6"
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm64
+    hooks:
+      post:
+        - ./upx.sh -9 "{{ .Path }}"
+  - main: ./main.go
+    id: no-upx
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -w -s -X "librespeed-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "386"
+      - amd64
+      - arm64
+      - mips
+      - mipsle
+      - mips64
+      - mips64le
+    gomips:
+      - hardfloat
+      - softfloat
+    ignore:
+      - goos: linux
+        goarch: "386"
+      - goos: linux
+        goarch: amd64
+      - goos: linux
+        goarch: arm64
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: amd64
 archives:
   - format_overrides:
       - goos: windows
@@ -75,7 +75,7 @@ archives:
       - LICENSE
     rlcp: true
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 changelog:
   skip: false
   sort: asc
