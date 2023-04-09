@@ -1,6 +1,6 @@
 FROM golang:1.20.3-alpine as builder
 
-RUN apk add --no-cache bash 
+RUN apk add --no-cache bash upx
 
 # Set working directory
 WORKDIR /usr/src/librespeed-cli
