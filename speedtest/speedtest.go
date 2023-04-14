@@ -157,50 +157,32 @@ func SpeedTest(c *cli.Context) error {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify)}
 
-	// bind to source IP address if given, or if ipv4/ipv6 is forced
-	if src := c.String(defs.OptionSource); src != "" || (forceIPv4 || forceIPv6) {
-		var localTCPAddr *net.TCPAddr
-		if src != "" {
-			// first we parse the IP to see if it's valid
-			addr, err := net.ResolveIPAddr(network, src)
-			if err != nil {
-				if strings.Contains(err.Error(), "no suitable address") {
-					if forceIPv6 {
-						log.Errorf("Address %s is not a valid IPv6 address", src)
-					} else {
-						log.Errorf("Address %s is not a valid IPv4 address", src)
-					}
-				} else {
-					log.Errorf("Error parsing source IP: %s", err)
-				}
-				return err
-			}
-
-			log.Debugf("Using %s as source IP", src)
-			localTCPAddr = &net.TCPAddr{IP: addr.IP}
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	// bind to source IP address if given
+	if src := c.String(defs.OptionSource); src != "" {
+		var err error
+		dialer, err = newDialerAddressBound(src, network)
+		if err != nil {
+			return err
 		}
-
+	}
+	// Enforce if ipv4/ipv6 is forced
+	if forceIPv4 || forceIPv6 {
 		var dialContext func(context.Context, string, string) (net.Conn, error)
-		defaultDialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
-
-		if localTCPAddr != nil {
-			defaultDialer.LocalAddr = localTCPAddr
-		}
-
 		switch {
 		case forceIPv4:
 			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return defaultDialer.DialContext(ctx, "tcp4", address)
+				return dialer.DialContext(ctx, "tcp4", address)
 			}
 		case forceIPv6:
 			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return defaultDialer.DialContext(ctx, "tcp6", address)
+				return dialer.DialContext(ctx, "tcp6", address)
 			}
 		default:
-			dialContext = defaultDialer.DialContext
+			dialContext = dialer.DialContext
 		}
 
 		// set default HTTP client's Transport to the one that binds the source address
@@ -473,4 +455,32 @@ func contains(arr []int, val int) bool {
 		}
 	}
 	return false
+}
+
+func newDialerAddressBound(src string, network string) (dialer *net.Dialer, err error) {
+	// first we parse the IP to see if it's valid
+	addr, err := net.ResolveIPAddr(network, src)
+	if err != nil {
+		if strings.Contains(err.Error(), "no suitable address") {
+			if network == "ip6" {
+				log.Errorf("Address %s is not a valid IPv6 address", src)
+			} else {
+				log.Errorf("Address %s is not a valid IPv4 address", src)
+			}
+		} else {
+			log.Errorf("Error parsing source IP: %s", err)
+		}
+		return nil, err
+	}
+
+	log.Debugf("Using %s as source IP", src)
+	localTCPAddr := &net.TCPAddr{IP: addr.IP}
+
+	defaultDialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	defaultDialer.LocalAddr = localTCPAddr
+	return defaultDialer, nil
 }
