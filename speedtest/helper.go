@@ -28,7 +28,7 @@ const (
 )
 
 // doSpeedTest is where the actual speed test happens
-func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.TelemetryServer, network string, silent bool) error {
+func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.TelemetryServer, network string, silent bool, noICMP bool) error {
 	if serverCount := len(servers); serverCount > 1 {
 		log.Infof("Testing against %d servers", serverCount)
 	}
@@ -70,7 +70,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			}
 
 			// skip ICMP if option given
-			currentServer.NoICMP = c.Bool(defs.OptionNoICMP)
+			currentServer.NoICMP = noICMP
 
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {

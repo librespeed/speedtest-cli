@@ -74,6 +74,10 @@ func SpeedTest(c *cli.Context) error {
 		return nil
 	}
 
+	if c.String(defs.OptionSource) != "" && c.String(defs.OptionInterface) != "" {
+		return fmt.Errorf("incompatible options '%s' and '%s'", defs.OptionSource, defs.OptionInterface)
+	}
+
 	// set CSV delimiter
 	gocsv.TagSeparator = c.String(defs.OptionCSVDelimiter)
 
@@ -138,6 +142,8 @@ func SpeedTest(c *cli.Context) error {
 		return errors.New("invalid concurrent requests setting")
 	}
 
+	noICMP := c.Bool(defs.OptionNoICMP)
+
 	// HTTP requests timeout
 	http.DefaultClient.Timeout = time.Duration(c.Int(defs.OptionTimeout)) * time.Second
 
@@ -157,57 +163,48 @@ func SpeedTest(c *cli.Context) error {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify)}
 
-	// bind to source IP address if given, or if ipv4/ipv6 is forced
-	if src := c.String(defs.OptionSource); src != "" || (forceIPv4 || forceIPv6) {
-		var localTCPAddr *net.TCPAddr
-		if src != "" {
-			// first we parse the IP to see if it's valid
-			addr, err := net.ResolveIPAddr(network, src)
-			if err != nil {
-				if strings.Contains(err.Error(), "no suitable address") {
-					if forceIPv6 {
-						log.Errorf("Address %s is not a valid IPv6 address", src)
-					} else {
-						log.Errorf("Address %s is not a valid IPv4 address", src)
-					}
-				} else {
-					log.Errorf("Error parsing source IP: %s", err)
-				}
-				return err
-			}
-
-			log.Debugf("Using %s as source IP", src)
-			localTCPAddr = &net.TCPAddr{IP: addr.IP}
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	// bind to source IP address if given
+	if src := c.String(defs.OptionSource); src != "" {
+		var err error
+		dialer, err = newDialerAddressBound(src, network)
+		if err != nil {
+			return err
 		}
-
-		var dialContext func(context.Context, string, string) (net.Conn, error)
-		defaultDialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
-
-		if localTCPAddr != nil {
-			defaultDialer.LocalAddr = localTCPAddr
-		}
-
-		switch {
-		case forceIPv4:
-			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return defaultDialer.DialContext(ctx, "tcp4", address)
-			}
-		case forceIPv6:
-			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return defaultDialer.DialContext(ctx, "tcp6", address)
-			}
-		default:
-			dialContext = defaultDialer.DialContext
-		}
-
-		// set default HTTP client's Transport to the one that binds the source address
-		// this is modified from http.DefaultTransport
-		transport.DialContext = dialContext
 	}
 
+	// bind to interface if given
+	if iface := c.String(defs.OptionInterface); iface != "" {
+		var err error
+		dialer, err = newDialerInterfaceBound(iface)
+		if err != nil {
+			return err
+		}
+		// ICMP ping does not support interface binding.
+		noICMP = true
+	}
+
+	// enforce if ipv4/ipv6 is forced
+	var dialContext func(context.Context, string, string) (net.Conn, error)
+	switch {
+	case forceIPv4:
+		dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+			return dialer.DialContext(ctx, "tcp4", address)
+		}
+	case forceIPv6:
+		dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+			return dialer.DialContext(ctx, "tcp6", address)
+		}
+	default:
+		dialContext = dialer.DialContext
+	}
+
+	// set default HTTP client's Transport to the one that binds the source address
+	// this is modified from http.DefaultTransport
+	transport.DialContext = dialContext
 	http.DefaultClient.Transport = transport
 
 	// load server list
@@ -258,7 +255,7 @@ func SpeedTest(c *cli.Context) error {
 
 	// if --server is given, do speed tests with all of them
 	if len(c.IntSlice(defs.OptionServer)) > 0 {
-		return doSpeedTest(c, servers, telemetryServer, network, silent)
+		return doSpeedTest(c, servers, telemetryServer, network, silent, noICMP)
 	} else {
 		// else select the fastest server from the list
 		log.Info("Selecting the fastest server based on ping")
@@ -272,7 +269,7 @@ func SpeedTest(c *cli.Context) error {
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
-			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network, c.Bool(defs.OptionNoICMP))
+			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network, noICMP)
 		}
 
 		// send ping jobs to workers
@@ -309,7 +306,7 @@ func SpeedTest(c *cli.Context) error {
 		}
 
 		// do speed test on the server
-		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent)
+		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent, noICMP)
 	}
 }
 
@@ -473,4 +470,32 @@ func contains(arr []int, val int) bool {
 		}
 	}
 	return false
+}
+
+func newDialerAddressBound(src string, network string) (dialer *net.Dialer, err error) {
+	// first we parse the IP to see if it's valid
+	addr, err := net.ResolveIPAddr(network, src)
+	if err != nil {
+		if strings.Contains(err.Error(), "no suitable address") {
+			if network == "ip6" {
+				log.Errorf("Address %s is not a valid IPv6 address", src)
+			} else {
+				log.Errorf("Address %s is not a valid IPv4 address", src)
+			}
+		} else {
+			log.Errorf("Error parsing source IP: %s", err)
+		}
+		return nil, err
+	}
+
+	log.Debugf("Using %s as source IP", src)
+	localTCPAddr := &net.TCPAddr{IP: addr.IP}
+
+	defaultDialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	defaultDialer.LocalAddr = localTCPAddr
+	return defaultDialer, nil
 }
