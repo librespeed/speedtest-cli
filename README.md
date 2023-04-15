@@ -180,7 +180,10 @@ GLOBAL OPTIONS:
    --server-json value            Use an alternative server list from remote JSON file
    --local-json value             Use an alternative server list from local JSON file,
                                   or read from stdin with "--local-json -".
-   --source SOURCE                SOURCE IP address to bind to
+   --source SOURCE                SOURCE IP address to bind to. Incompatible with --interface.
+   --interface INTERFACE          The name of the network interface to bind to. Example: "enp0s3".
+                                  Not supported on Windows and incompatible with --source.
+                                  Implies --no-icmp.
    --timeout TIMEOUT              HTTP TIMEOUT in seconds. (default: 15)
    --duration value               Upload and download test duration in seconds (default: 15)
    --chunks value                 Chunks to download from server, chunk size depends on server configuration (default: 100)

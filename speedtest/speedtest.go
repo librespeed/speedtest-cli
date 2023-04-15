@@ -74,6 +74,10 @@ func SpeedTest(c *cli.Context) error {
 		return nil
 	}
 
+	if c.String(defs.OptionSource) != "" && c.String(defs.OptionInterface) != "" {
+		return fmt.Errorf("incompatible options '%s' and '%s'", defs.OptionSource, defs.OptionInterface)
+	}
+
 	// set CSV delimiter
 	gocsv.TagSeparator = c.String(defs.OptionCSVDelimiter)
 
@@ -138,6 +142,8 @@ func SpeedTest(c *cli.Context) error {
 		return errors.New("invalid concurrent requests setting")
 	}
 
+	noICMP := c.Bool(defs.OptionNoICMP)
+
 	// HTTP requests timeout
 	http.DefaultClient.Timeout = time.Duration(c.Int(defs.OptionTimeout)) * time.Second
 
@@ -169,27 +175,36 @@ func SpeedTest(c *cli.Context) error {
 			return err
 		}
 	}
-	// Enforce if ipv4/ipv6 is forced
-	if forceIPv4 || forceIPv6 {
-		var dialContext func(context.Context, string, string) (net.Conn, error)
-		switch {
-		case forceIPv4:
-			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return dialer.DialContext(ctx, "tcp4", address)
-			}
-		case forceIPv6:
-			dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
-				return dialer.DialContext(ctx, "tcp6", address)
-			}
-		default:
-			dialContext = dialer.DialContext
-		}
 
-		// set default HTTP client's Transport to the one that binds the source address
-		// this is modified from http.DefaultTransport
-		transport.DialContext = dialContext
+	// bind to interface if given
+	if iface := c.String(defs.OptionInterface); iface != "" {
+		var err error
+		dialer, err = newDialerInterfaceBound(iface)
+		if err != nil {
+			return err
+		}
+		// ICMP ping does not support interface binding.
+		noICMP = true
 	}
 
+	// enforce if ipv4/ipv6 is forced
+	var dialContext func(context.Context, string, string) (net.Conn, error)
+	switch {
+	case forceIPv4:
+		dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+			return dialer.DialContext(ctx, "tcp4", address)
+		}
+	case forceIPv6:
+		dialContext = func(ctx context.Context, network, address string) (conn net.Conn, err error) {
+			return dialer.DialContext(ctx, "tcp6", address)
+		}
+	default:
+		dialContext = dialer.DialContext
+	}
+
+	// set default HTTP client's Transport to the one that binds the source address
+	// this is modified from http.DefaultTransport
+	transport.DialContext = dialContext
 	http.DefaultClient.Transport = transport
 
 	// load server list
@@ -240,7 +255,7 @@ func SpeedTest(c *cli.Context) error {
 
 	// if --server is given, do speed tests with all of them
 	if len(c.IntSlice(defs.OptionServer)) > 0 {
-		return doSpeedTest(c, servers, telemetryServer, network, silent)
+		return doSpeedTest(c, servers, telemetryServer, network, silent, noICMP)
 	} else {
 		// else select the fastest server from the list
 		log.Info("Selecting the fastest server based on ping")
@@ -254,7 +269,7 @@ func SpeedTest(c *cli.Context) error {
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
-			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network, c.Bool(defs.OptionNoICMP))
+			go pingWorker(jobs, results, &wg, c.String(defs.OptionSource), network, noICMP)
 		}
 
 		// send ping jobs to workers
@@ -291,7 +306,7 @@ func SpeedTest(c *cli.Context) error {
 		}
 
 		// do speed test on the server
-		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent)
+		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent, noICMP)
 	}
 }
 
