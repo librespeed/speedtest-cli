@@ -14,7 +14,7 @@ import (
 type BytesCounter struct {
 	start      time.Time
 	pos        int
-	total      int
+	total      uint64
 	payload    []byte
 	reader     io.ReadSeeker
 	mebi       bool
@@ -33,7 +33,7 @@ func NewCounter() *BytesCounter {
 func (c *BytesCounter) Write(p []byte) (int, error) {
 	n := len(p)
 	c.lock.Lock()
-	c.total += n
+	c.total += uint64(n)
 	c.lock.Unlock()
 
 	return n, nil
@@ -43,7 +43,7 @@ func (c *BytesCounter) Write(p []byte) (int, error) {
 func (c *BytesCounter) Read(p []byte) (int, error) {
 	n, err := c.reader.Read(p)
 	c.lock.Lock()
-	c.total += n
+	c.total += uint64(n)
 	c.pos += n
 	if c.pos == c.uploadSize {
 		c.resetReader()
@@ -116,7 +116,7 @@ func (c *BytesCounter) Start() {
 }
 
 // Total returns the total bytes read/written
-func (c *BytesCounter) Total() int {
+func (c *BytesCounter) Total() uint64 {
 	return c.total
 }
 

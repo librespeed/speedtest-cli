@@ -11,8 +11,8 @@ type JSONReport struct {
 	Timestamp     time.Time `json:"timestamp"`
 	Server        Server    `json:"server"`
 	Client        Client    `json:"client"`
-	BytesSent     int       `json:"bytes_sent"`
-	BytesReceived int       `json:"bytes_received"`
+	BytesSent     uint64    `json:"bytes_sent"`
+	BytesReceived uint64    `json:"bytes_received"`
 	Ping          float64   `json:"ping"`
 	Jitter        float64   `json:"jitter"`
 	Upload        float64   `json:"upload"`

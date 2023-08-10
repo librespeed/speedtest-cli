@@ -15,11 +15,10 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/gocarina/gocsv"
-	log "github.com/sirupsen/logrus"
-	"github.com/urfave/cli/v2"
-
 	"github.com/librespeed/speedtest-cli/defs"
 	"github.com/librespeed/speedtest-cli/report"
+	log "github.com/sirupsen/logrus"
+"github.com/urfave/cli/v2"
 )
 
 const (
@@ -85,7 +84,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 			// get download value
 			var downloadValue float64
-			var bytesRead int
+			var bytesRead uint64
 			if c.Bool(defs.OptionNoDownload) {
 				log.Info("Download test is disabled")
 			} else {
@@ -95,12 +94,12 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					return err
 				}
 				downloadValue = download
-				bytesRead = br
+				bytesRead = uint64(br)
 			}
 
 			// get upload value
 			var uploadValue float64
-			var bytesWritten int
+			var bytesWritten uint64
 			if c.Bool(defs.OptionNoUpload) {
 				log.Info("Upload test is disabled")
 			} else {
@@ -110,7 +109,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					return err
 				}
 				uploadValue = upload
-				bytesWritten = bw
+				bytesWritten = uint64(bw)
 			}
 
 			// print result if --simple is given
