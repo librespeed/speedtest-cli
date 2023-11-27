@@ -3,6 +3,7 @@ package speedtest
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,8 +155,25 @@ func SpeedTest(c *cli.Context) error {
 		network = "ip"
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify)}
+    transport := http.DefaultTransport.(*http.Transport).Clone()
+
+    if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
+        caCert, err := ioutil.ReadFile(caCertFileName)
+        if err != nil {
+            log.Fatal(err)
+        }
+        caCertPool := x509.NewCertPool()
+        caCertPool.AppendCertsFromPEM(caCert)
+
+        transport.TLSClientConfig = &tls.Config{
+            InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
+            RootCAs: caCertPool,
+        }
+    } else {
+        transport.TLSClientConfig = &tls.Config{
+            InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
+        }
+    }
 
 	// bind to source IP address if given, or if ipv4/ipv6 is forced
 	if src := c.String(defs.OptionSource); src != "" || (forceIPv4 || forceIPv6) {
