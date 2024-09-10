@@ -10,9 +10,10 @@ CURRENT_DIR=$(pwd)
 OUT_DIR=${CURRENT_DIR}/out
 
 PROGNAME="librespeed-cli"
+DEFS_PATH="github.com/librespeed/speedtest-cli"
 BINARY=${PROGNAME}-$(go env GOOS)-$(go env GOARCH)
 BUILD_DATE=$(date -u "+%Y-%m-%d %H:%M:%S %Z")
-LDFLAGS="-w -s -X \"librespeed-cli/defs.ProgName=${PROGNAME}\" -X \"librespeed-cli/defs.ProgVersion=${PROGVER}\" -X \"librespeed-cli/defs.BuildDate=${BUILD_DATE}\""
+LDFLAGS="-w -s -X \"${DEFS_PATH}/defs.ProgName=${PROGNAME}\" -X \"${DEFS_PATH}/defs.ProgVersion=${PROGVER}\" -X \"${DEFS_PATH}/defs.BuildDate=${BUILD_DATE}\""
 
 if [[ -n "${GOARM}" ]] && [[ "${GOARM}" -gt 0 ]]; then
   BINARY=${BINARY}v${GOARM}
