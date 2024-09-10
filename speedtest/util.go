@@ -1,3 +1,6 @@
+//go:build !linux
+// +build !linux
+
 package speedtest
 
 import (
@@ -6,5 +9,5 @@ import (
 )
 
 func newDialerInterfaceBound(iface string) (dialer *net.Dialer, err error) {
-	return nil, fmt.Errorf("cannot bound to interface on Windows")
+	return nil, fmt.Errorf("cannot bound to interface on this platform")
 }
