@@ -24,6 +24,7 @@ const (
 	OptionExclude         = "exclude"
 	OptionServerJSON      = "server-json"
 	OptionSource          = "source"
+	OptionInterface       = "interface"
 	OptionTimeout         = "timeout"
 	OptionChunks          = "chunks"
 	OptionUploadSize      = "upload-size"

@@ -139,6 +139,10 @@ func main() {
 				Name:  defs.OptionSource,
 				Usage: "`SOURCE` IP address to bind to",
 			},
+			&cli.StringFlag{
+				Name:  defs.OptionInterface,
+				Usage: "network INTERFACE to bind to",
+			},
 			&cli.IntFlag{
 				Name:  defs.OptionTimeout,
 				Usage: "HTTP `TIMEOUT` in seconds.",
