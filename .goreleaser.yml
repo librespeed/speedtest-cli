@@ -1,3 +1,4 @@
+version: 2
 project_name: "librespeed-cli"
 #dist: ./out
 before:
@@ -73,11 +74,10 @@ archives:
         format: zip
     files:
       - LICENSE
-    rlcp: true
 checksum:
   name_template: "checksums.txt"
 changelog:
-  skip: false
+  disable: false
   sort: asc
 release:
   github:
