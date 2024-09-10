@@ -135,7 +135,7 @@ You can run `librespeed-cli` in a container.
 
 You can see the full list of supported options with `librespeed-cli -h`:
 
-```shell script
+```
 $ librespeed-cli -h
 NAME:
    librespeed-cli - Test your Internet speed with LibreSpeed 🚀
