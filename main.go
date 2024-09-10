@@ -168,6 +168,11 @@ func main() {
 				Usage: "Use HTTPS instead of HTTP when communicating with\n" +
 					"\tLibreSpeed.org operated servers",
 			},
+			&cli.StringFlag{
+				Name: defs.OptionCACert,
+				Usage: "Use the specified CA certificate PEM bundle file instead\n" +
+				    "\tof the system certificate trust store",
+			},
 			&cli.BoolFlag{
 				Name:  defs.OptionSkipCertVerify,
 				Usage: "Skip verifying SSL certificate for HTTPS connections (self-signed certs)",

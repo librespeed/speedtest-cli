@@ -30,6 +30,7 @@ const (
 	OptionUploadSize      = "upload-size"
 	OptionDuration        = "duration"
 	OptionSecure          = "secure"
+	OptionCACert          = "ca-cert"
 	OptionSkipCertVerify  = "skip-cert-verify"
 	OptionNoPreAllocate   = "no-pre-allocate"
 	OptionVersion         = "version"

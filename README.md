@@ -190,6 +190,8 @@ GLOBAL OPTIONS:
    --upload-size value            Size of payload being uploaded in KiB (default: 1024)
    --secure                       Use HTTPS instead of HTTP when communicating with
                                   LibreSpeed.org operated servers (default: false)
+   --ca-cert value                Use the specified CA certificate PEM bundle file instead
+                                  of the system certificate trust store
    --skip-cert-verify             Skip verifying SSL certificate for HTTPS connections (self-signed certs) (default: false)
    --no-pre-allocate              Do not pre allocate upload data. Pre allocation is
                                   enabled by default to improve upload performance. To
