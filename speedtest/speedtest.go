@@ -105,7 +105,7 @@ func SpeedTest(c *cli.Context) error {
 				return err
 			}
 			if err := json.Unmarshal(b, &telemetryServer); err != nil {
-				log.Errorf("Error parsing %s: %s", err)
+				log.Errorf("Error parsing %s: %s", telemetryJSON, err)
 				return err
 			}
 		}
