@@ -22,7 +22,7 @@ This is a command line interface for LibreSpeed speed test backends, written in 
 [![asciicast](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2.svg)](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2)
 
 ## Requirements for compiling
-- Go 1.14+
+- Go 1.18+
 
 ## Runtime requirements
 - Any [Go supported platforms](https://github.com/golang/go/wiki/MinimumRequirements)
