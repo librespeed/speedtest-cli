@@ -171,7 +171,7 @@ func main() {
 			&cli.StringFlag{
 				Name: defs.OptionCACert,
 				Usage: "Use the specified CA certificate PEM bundle file instead\n" +
-				    "\tof the system certificate trust store",
+					"\tof the system certificate trust store",
 			},
 			&cli.BoolFlag{
 				Name:  defs.OptionSkipCertVerify,
@@ -217,6 +217,11 @@ func main() {
 				Name: defs.OptionTelemetryExtra,
 				Usage: "Send a custom message along with the telemetry results.\n" +
 					"\tImplies --" + defs.OptionShare,
+			},
+			&cli.IntFlag{
+				Name:  defs.OptionFwmark,
+				Usage: "firewall mark to set on socket.",
+				Value: 0,
 			},
 		},
 	}

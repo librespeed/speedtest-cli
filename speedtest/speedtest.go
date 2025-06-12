@@ -161,25 +161,25 @@ func SpeedTest(c *cli.Context) error {
 		network = "ip"
 	}
 
-    transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
 
-    if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
-        caCert, err := ioutil.ReadFile(caCertFileName)
-        if err != nil {
-            log.Fatal(err)
-        }
-        caCertPool := x509.NewCertPool()
-        caCertPool.AppendCertsFromPEM(caCert)
+	if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
+		caCert, err := ioutil.ReadFile(caCertFileName)
+		if err != nil {
+			log.Fatal(err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
 
-        transport.TLSClientConfig = &tls.Config{
-            InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
-            RootCAs: caCertPool,
-        }
-    } else {
-        transport.TLSClientConfig = &tls.Config{
-            InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
-        }
-    }
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
+			RootCAs:            caCertPool,
+		}
+	} else {
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
+		}
+	}
 
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
@@ -195,9 +195,13 @@ func SpeedTest(c *cli.Context) error {
 	}
 
 	// bind to interface if given
-	if iface := c.String(defs.OptionInterface); iface != "" {
+	// bind to interface if given
+	iface := c.String(defs.OptionInterface)
+	fwmark := c.Int(defs.OptionFwmark)
+
+	if iface != "" || fwmark > 0 {
 		var err error
-		dialer, err = newDialerInterfaceBound(iface)
+		dialer, err = newDialerInterfaceOrFwmarkBound(iface, fwmark)
 		if err != nil {
 			return err
 		}
