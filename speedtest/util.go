@@ -8,6 +8,6 @@ import (
 	"net"
 )
 
-func newDialerInterfaceBound(iface string) (dialer *net.Dialer, err error) {
+func newDialerInterfaceOrFwmarkBound(iface string, fwmark int) (dialer *net.Dialer, err error) {
 	return nil, fmt.Errorf("cannot bound to interface on this platform")
 }
