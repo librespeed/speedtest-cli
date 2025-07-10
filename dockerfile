@@ -1,6 +1,6 @@
-FROM golang:1.20.3-alpine as builder
+FROM golang:1.23.0-alpine AS builder
 
-RUN apk add --no-cache bash upx
+RUN apk add --no-cache bash upx git
 
 # Set working directory
 WORKDIR /usr/src/librespeed-cli
@@ -16,4 +16,4 @@ FROM alpine:3.17
 # Copy librespeed-cli binary
 COPY --from=builder /usr/src/librespeed-cli/out/librespeed-cli* /bin/librespeed-cli
 
-CMD ["/bin/librespeed-cli"]
+ENTRYPOINT ["/bin/librespeed-cli"]
