@@ -18,7 +18,7 @@ import (
 	"github.com/librespeed/speedtest-cli/defs"
 	"github.com/librespeed/speedtest-cli/report"
 	log "github.com/sirupsen/logrus"
-"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v2"
 )
 
 const (

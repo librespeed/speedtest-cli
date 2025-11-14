@@ -59,9 +59,10 @@ func (s *Server) IsUp() bool {
 		return false
 	}
 	defer resp.Body.Close()
-	b, _ := ioutil.ReadAll(resp.Body)
-	if len(b) > 0 {
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil || len(b) > 0 {
 		log.Debugf("Failed when parsing get IP result: %s", b)
+		return false
 	}
 	// only return online if the ping URL returns nothing and 200
 	return resp.StatusCode == http.StatusOK
