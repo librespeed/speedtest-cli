@@ -321,8 +321,14 @@ func SpeedTest(c *cli.Context) error {
 
 		// get the fastest server's index in the `servers` array
 		var serverIdx int
-		for idx, ping := range pingList {
-			if ping > 0 && ping <= pingList[serverIdx] {
+		for idx, newPing := range pingList {
+			oldPing, ok := pingList[serverIdx]
+
+			if ok {
+				if newPing > 0 && newPing <= oldPing {
+					serverIdx = idx
+				}
+			} else {
 				serverIdx = idx
 			}
 		}
