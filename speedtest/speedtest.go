@@ -32,6 +32,10 @@ const (
 	defaultTelemetryServer = "https://librespeed.org"
 	defaultTelemetryPath   = "/results/telemetry.php"
 	defaultTelemetryShare  = "/results/"
+
+	forceNothing = 0
+	forceHttps = 1
+	forceHttp = 2
 )
 
 type PingJob struct {
@@ -229,6 +233,16 @@ func SpeedTest(c *cli.Context) error {
 	transport.DialContext = dialContext
 	http.DefaultClient.Transport = transport
 
+	// no scheme is forced by default
+	// force https if --secure is given
+	// else force http if --insecure is given
+	var forceScheme int = forceNothing
+	if c.Bool(defs.OptionSecure) {
+		forceScheme = forceHttps
+	} else if c.Bool(defs.OptionInsecure) {
+		forceScheme = forceHttp
+	}
+
 	// load server list
 	var servers []defs.Server
 	var err error
@@ -237,11 +251,11 @@ func SpeedTest(c *cli.Context) error {
 		case "-":
 			// load server list from stdin
 			log.Info("Using local JSON server list from stdin")
-			servers, err = getLocalServersReader(c.Bool(defs.OptionSecure), os.Stdin, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+			servers, err = getLocalServersReader(forceScheme, os.Stdin, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		default:
 			// load server list from local JSON file
 			log.Infof("Using local JSON server list: %s", str)
-			servers, err = getLocalServers(c.Bool(defs.OptionSecure), str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+			servers, err = getLocalServers(forceScheme, str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	} else {
 		// fetch the server list JSON and parse it into the `servers` array
@@ -251,11 +265,11 @@ func SpeedTest(c *cli.Context) error {
 		}
 		log.Infof("Retrieving server list from %s", serverUrl)
 
-		servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+		servers, err = getServerList(forceScheme, serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 
 		if err != nil {
 			log.Info("Retry with /.well-known/librespeed")
-			servers, err = getServerList(c.Bool(defs.OptionSecure), serverUrl+"/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+			servers, err = getServerList(forceScheme, serverUrl+"/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	}
 	if err != nil {
@@ -373,7 +387,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 }
 
 // getServerList fetches the server JSON from a remote server
-func getServerList(forceHTTPS bool, serverList string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+func getServerList(forceScheme int, serverList string, excludes, specific []int, filter bool) ([]defs.Server, error) {
 	// --exclude and --server cannot be used at the same time
 	if len(excludes) > 0 && len(specific) > 0 {
 		return nil, errors.New("either --exclude or --server can be used")
@@ -402,11 +416,11 @@ func getServerList(forceHTTPS bool, serverList string, excludes, specific []int,
 		return nil, err
 	}
 
-	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
+	return preprocessServers(servers, forceScheme, excludes, specific, filter)
 }
 
 // getLocalServersReader loads the server JSON from an io.Reader
-func getLocalServersReader(forceHTTPS bool, reader io.ReadCloser, excludes, specific []int, filter bool) ([]defs.Server, error) {
+func getLocalServersReader(forceScheme int, reader io.ReadCloser, excludes, specific []int, filter bool) ([]defs.Server, error) {
 	defer reader.Close()
 
 	var servers []defs.Server
@@ -420,30 +434,33 @@ func getLocalServersReader(forceHTTPS bool, reader io.ReadCloser, excludes, spec
 		return nil, err
 	}
 
-	return preprocessServers(servers, forceHTTPS, excludes, specific, filter)
+	return preprocessServers(servers, forceScheme, excludes, specific, filter)
 }
 
 // getLocalServers loads the server JSON from a local file
-func getLocalServers(forceHTTPS bool, jsonFile string, excludes, specific []int, filter bool) ([]defs.Server, error) {
+func getLocalServers(forceScheme int, jsonFile string, excludes, specific []int, filter bool) ([]defs.Server, error) {
 	f, err := os.OpenFile(jsonFile, os.O_RDONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
-	return getLocalServersReader(forceHTTPS, f, excludes, specific, filter)
+	return getLocalServersReader(forceScheme, f, excludes, specific, filter)
 }
 
 // preprocessServers makes some needed modifications to the servers fetched
-func preprocessServers(servers []defs.Server, forceHTTPS bool, excludes, specific []int, filter bool) ([]defs.Server, error) {
+func preprocessServers(servers []defs.Server, forceScheme int, excludes, specific []int, filter bool) ([]defs.Server, error) {
 	for i := range servers {
 		u, err := servers[i].GetURL()
 		if err != nil {
 			return nil, err
 		}
 
-		// if no scheme is defined, use http as default, or https when --secure is given in cli options
-		// if the scheme is predefined and --secure is not given, we will use it as-is
-		if forceHTTPS {
+		// if no scheme is defined, use http as default, or https when --secure is given in cli options,
+		// of http if --insecure is given in cli options
+		// if the scheme is predefined and neither --secure nor --insecure is not given, we will use it as-is
+		if forceScheme == forceHttps {
 			u.Scheme = "https"
+		} else if forceScheme == forceHttp {
+			u.Scheme = "http"
 		} else if u.Scheme == "" {
 			// if `secure` is not used and no scheme is defined, use http
 			u.Scheme = "http"
