@@ -63,6 +63,8 @@ builds:
         goarch: arm64
       - goos: darwin
         goarch: "386"
+      - goos: darwin
+        goarch: amd64
 upx:
   - ids: [upx]
     compress: "9"
