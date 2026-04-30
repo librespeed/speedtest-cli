@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/gocarina/gocsv"
-	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 
 	"github.com/librespeed/speedtest-cli/defs"
+	"github.com/librespeed/speedtest-cli/output"
 	"github.com/librespeed/speedtest-cli/report"
 )
 
@@ -52,13 +52,13 @@ func SpeedTest(c *cli.Context) error {
 	// check for suppressed output flags
 	var silent bool
 	if c.Bool(defs.OptionSimple) || c.Bool(defs.OptionJSON) || c.Bool(defs.OptionCSV) {
-		log.SetLevel(log.WarnLevel)
+		output.SetQuiet(true)
 		silent = true
 	}
 
 	// check for debug flag
 	if c.Bool(defs.OptionDebug) {
-		log.SetLevel(log.DebugLevel)
+		output.SetDebug(true)
 	}
 
 	// print help
@@ -68,13 +68,12 @@ func SpeedTest(c *cli.Context) error {
 
 	// print version
 	if c.Bool(defs.OptionVersion) {
-		log.SetOutput(os.Stdout)
-		log.Warnf("%s %s (built on %s)", defs.ProgName, defs.ProgVersion, defs.BuildDate)
-		log.Warn("https://github.com/librespeed/speedtest-cli")
-		log.Warn("Licensed under GNU Lesser General Public License v3.0")
-		log.Warn("LibreSpeed\tCopyright (C) 2016-2020 Federico Dossena")
-		log.Warn("librespeed-cli\tCopyright (C) 2020 Maddie Zhan")
-		log.Warn("librespeed.org\tCopyright (C)")
+		output.WriteOut("%s %s (built on %s)\n", defs.ProgName, defs.ProgVersion, defs.BuildDate)
+		output.WriteOut("https://github.com/librespeed/speedtest-cli\n")
+		output.WriteOut("Licensed under GNU Lesser General Public License v3.0\n")
+		output.WriteOut("LibreSpeed\tCopyright (C) 2016-2020 Federico Dossena\n")
+		output.WriteOut("librespeed-cli\tCopyright (C) 2020 Maddie Zhan\n")
+		output.WriteOut("librespeed.org\tCopyright (C)\n")
 		return nil
 	}
 
@@ -104,18 +103,18 @@ func SpeedTest(c *cli.Context) error {
 		if telemetryJSON != "" {
 			b, err := os.ReadFile(telemetryJSON)
 			if err != nil {
-				log.Errorf("Cannot read %s: %s", telemetryJSON, err)
+				output.WriteError("Cannot read %s: %s\n", telemetryJSON, err)
 				return err
 			}
 			if err := json.Unmarshal(b, &telemetryServer); err != nil {
-				log.Errorf("Error parsing %s: %s", telemetryJSON, err)
+				output.WriteError("Error parsing %s: %s\n", telemetryJSON, err)
 				return err
 			}
 		}
 
 		if telemetryLevel != "" {
 			if telemetryLevel != "disabled" && telemetryLevel != "basic" && telemetryLevel != "full" && telemetryLevel != "debug" {
-				log.Fatalf("Unsupported telemetry level: %s", telemetryLevel)
+				output.Fatalf("Unsupported telemetry level: %s", telemetryLevel)
 			}
 			telemetryServer.Level = telemetryLevel
 		} else if telemetryServer.Level == "" {
@@ -142,7 +141,7 @@ func SpeedTest(c *cli.Context) error {
 	}
 
 	if req := c.Int(defs.OptionConcurrent); req <= 0 {
-		log.Errorf("Concurrent requests cannot be lower than 1: %d is given", req)
+		output.WriteError("Concurrent requests cannot be lower than 1: %d is given\n", req)
 		return errors.New("invalid concurrent requests setting")
 	}
 
@@ -173,7 +172,7 @@ func SpeedTest(c *cli.Context) error {
 	if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
 		caCert, err := os.ReadFile(caCertFileName)
 		if err != nil {
-			log.Fatal(err)
+			output.Fatal(err)
 		}
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(caCert)
@@ -252,11 +251,11 @@ func SpeedTest(c *cli.Context) error {
 		switch str {
 		case "-":
 			// load server list from stdin
-			log.Info("Using local JSON server list from stdin")
+			output.WriteUI("Using local JSON server list from stdin\n")
 			servers, err = getLocalServersReader(forceScheme, os.Stdin, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		default:
 			// load server list from local JSON file
-			log.Infof("Using local JSON server list: %s", str)
+			output.WriteUI("Using local JSON server list: %s\n", str)
 			servers, err = getLocalServers(forceScheme, str, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	} else {
@@ -265,17 +264,17 @@ func SpeedTest(c *cli.Context) error {
 		if str := c.String(defs.OptionServerJSON); str != "" {
 			serverUrl = str
 		}
-		log.Infof("Retrieving server list from %s", serverUrl)
+		output.WriteUI("Retrieving server list from %s\n", serverUrl)
 
 		servers, err = getServerList(forceScheme, serverUrl, c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 
 		if err != nil {
-			log.Info("Retry with /.well-known/librespeed")
+			output.WriteUI("Retry with /.well-known/librespeed\n")
 			servers, err = getServerList(forceScheme, serverUrl+"/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	}
 	if err != nil {
-		log.Errorf("Error when fetching server list: %s", err)
+		output.WriteError("Error when fetching server list: %s\n", err)
 		return err
 	}
 
@@ -286,7 +285,7 @@ func SpeedTest(c *cli.Context) error {
 			if svr.Sponsor() != "" {
 				sponsorMsg = fmt.Sprintf(" [Sponsor: %s]", svr.Sponsor())
 			}
-			log.Warnf("%d: %s (%s) %s", svr.ID, svr.Name, svr.Server, sponsorMsg)
+			output.WriteOut("%d: %s (%s) %s\n", svr.ID, svr.Name, svr.Server, sponsorMsg)
 		}
 		return nil
 	}
@@ -296,7 +295,7 @@ func SpeedTest(c *cli.Context) error {
 		return doSpeedTest(c, servers, telemetryServer, network, silent, noICMP)
 	} else {
 		// else select the fastest server from the list
-		log.Info("Selecting the fastest server based on ping")
+		output.WriteUI("Selecting the fastest server based on ping\n")
 
 		var wg sync.WaitGroup
 		jobs := make(chan PingJob, len(servers))
@@ -333,7 +332,7 @@ func SpeedTest(c *cli.Context) error {
 		}
 
 		if len(pingList) == 0 {
-			log.Fatal("No server is currently available, please try again later.")
+			output.Fatal("No server is currently available, please try again later.")
 		}
 
 		// get the fastest server's index in the `servers` array
@@ -361,7 +360,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 		// get the URL of the speed test server from the JSON
 		u, err := server.GetURL()
 		if err != nil {
-			log.Debugf("Server URL is invalid for %s (%s), skipping", server.Name, server.Server)
+			output.WriteDebug("Server URL is invalid for %s (%s), skipping\n", server.Name, server.Server)
 			wg.Done()
 			continue
 		}
@@ -374,7 +373,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			// if server is up, get ping
 			ping, _, err := server.ICMPPingAndJitter(1, srcIp, network)
 			if err != nil {
-				log.Debugf("Can't ping server %s (%s), skipping", server.Name, u.Hostname())
+				output.WriteDebug("Can't ping server %s (%s), skipping\n", server.Name, u.Hostname())
 				wg.Done()
 				continue
 			}
@@ -382,7 +381,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			results <- PingResult{Index: job.Index, Ping: ping}
 			wg.Done()
 		} else {
-			log.Debugf("Server %s (%s) doesn't seem to be up, skipping", server.Name, u.Hostname())
+			output.WriteDebug("Server %s (%s) doesn't seem to be up, skipping\n", server.Name, u.Hostname())
 			wg.Done()
 		}
 	}
@@ -525,17 +524,17 @@ func newDialerAddressBound(src string, network string) (dialer *net.Dialer, err 
 	if err != nil {
 		if strings.Contains(err.Error(), "no suitable address") {
 			if network == "ip6" {
-				log.Errorf("Address %s is not a valid IPv6 address", src)
+				output.WriteError("Address %s is not a valid IPv6 address\n", src)
 			} else {
-				log.Errorf("Address %s is not a valid IPv4 address", src)
+				output.WriteError("Address %s is not a valid IPv4 address\n", src)
 			}
 		} else {
-			log.Errorf("Error parsing source IP: %s", err)
+			output.WriteError("Error parsing source IP: %s\n", err)
 		}
 		return nil, err
 	}
 
-	log.Debugf("Using %s as source IP", src)
+	output.WriteDebug("Using %s as source IP\n", src)
 	localTCPAddr := &net.TCPAddr{IP: addr.IP}
 
 	defaultDialer := &net.Dialer{
