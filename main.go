@@ -3,27 +3,12 @@ package main
 import (
 	"os"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 
 	"github.com/librespeed/speedtest-cli/defs"
+	"github.com/librespeed/speedtest-cli/output"
 	"github.com/librespeed/speedtest-cli/speedtest"
 )
-
-// init sets up the essential bits on start up
-func init() {
-	// set logrus formatter and default log level
-	formatter := &defs.NoFormatter{}
-
-	// debug level is for --debug messages
-	// info level is for non-suppress mode
-	// warn level is for suppress modes
-	// error level is for errors
-
-	log.SetOutput(os.Stderr)
-	log.SetFormatter(formatter)
-	log.SetLevel(log.InfoLevel)
-}
 
 func main() {
 	// define cli options
@@ -234,6 +219,6 @@ func main() {
 	// run main function with cli options
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal("Terminated due to error")
+		output.Fatal("Terminated due to error")
 	}
 }
