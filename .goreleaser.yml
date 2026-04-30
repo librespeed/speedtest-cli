@@ -1,6 +1,5 @@
 version: 2
 project_name: "librespeed-cli"
-#dist: ./out
 before:
   hooks:
     - go mod download
@@ -31,9 +30,6 @@ builds:
         goarch: "386"
       - goos: darwin
         goarch: arm64
-    hooks:
-      post:
-        - ./upx.sh -9 "{{ .Path }}"
   - main: ./main.go
     id: no-upx
     env:
@@ -67,6 +63,10 @@ builds:
         goarch: arm64
       - goos: darwin
         goarch: "386"
+upx:
+  - ids: [upx]
+    compress: "9"
+    enabled: true
 archives:
   - format_overrides:
       - goos: windows
