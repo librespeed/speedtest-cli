@@ -12,7 +12,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -w -s -X "github.com/librespeed/speedtest-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
+      - -w -s -X "github.com/librespeed/speedtest-cli/defs.ProgName={{ .ProjectName }}" -X "github.com/librespeed/speedtest-cli/defs.ProgVersion=v{{ .Version }}" -X "github.com/librespeed/speedtest-cli/defs.BuildDate={{ .Date }}"
     goos:
       - linux
       - darwin
@@ -41,7 +41,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -w -s -X "github.com/librespeed/speedtest-cli/defs.ProgName={{ .ProjectName }}" -X "librespeed-cli/defs.ProgVersion=v{{ .Version }}" -X "librespeed-cli/defs.BuildDate={{ .Date }}"
+      - -w -s -X "github.com/librespeed/speedtest-cli/defs.ProgName={{ .ProjectName }}" -X "github.com/librespeed/speedtest-cli/defs.ProgVersion=v{{ .Version }}" -X "github.com/librespeed/speedtest-cli/defs.BuildDate={{ .Date }}"
     goos:
       - linux
       - windows
@@ -67,8 +67,6 @@ builds:
         goarch: arm64
       - goos: darwin
         goarch: "386"
-      - goos: darwin
-        goarch: amd64
 archives:
   - format_overrides:
       - goos: windows

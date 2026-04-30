@@ -79,7 +79,7 @@ func main() {
 			&cli.BoolFlag{
 				Name: defs.OptionCSV,
 				Usage: "Suppress verbose output, only show basic information in CSV\n" +
-					"\tformat. Speeds listed in bit/s and not affected by --bytes\n\t",
+					"\tformat. Speeds listed in Mbps and not affected by --bytes\n\t",
 			},
 			&cli.StringFlag{
 				Name: defs.OptionCSVDelimiter,
@@ -94,7 +94,7 @@ func main() {
 			&cli.BoolFlag{
 				Name: defs.OptionJSON,
 				Usage: "Suppress verbose output, only show basic information\n" +
-					"\tin JSON format. Speeds listed in bit/s and not\n" +
+					"\tin JSON format. Speeds listed in Mbps and not\n" +
 					"\taffected by --bytes",
 			},
 			&cli.BoolFlag{
