@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -103,7 +102,7 @@ func SpeedTest(c *cli.Context) error {
 	telemetryShare := c.String(defs.OptionTelemetryShare)
 	if c.Bool(defs.OptionShare) || telemetryJSON != "" || telemetryLevel != "" || telemetryServerString != "" || telemetryPath != "" || telemetryShare != "" {
 		if telemetryJSON != "" {
-			b, err := ioutil.ReadFile(telemetryJSON)
+			b, err := os.ReadFile(telemetryJSON)
 			if err != nil {
 				log.Errorf("Cannot read %s: %s", telemetryJSON, err)
 				return err
@@ -166,9 +165,13 @@ func SpeedTest(c *cli.Context) error {
 	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// tune connection pool for concurrent speed tests
+	concurrent := c.Int(defs.OptionConcurrent)
+	transport.MaxIdleConnsPerHost = concurrent + 2
+	transport.MaxConnsPerHost = concurrent + 2
 
 	if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
-		caCert, err := ioutil.ReadFile(caCertFileName)
+		caCert, err := os.ReadFile(caCertFileName)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -198,7 +201,6 @@ func SpeedTest(c *cli.Context) error {
 		}
 	}
 
-	// bind to interface if given
 	// bind to interface if given
 	iface := c.String(defs.OptionInterface)
 	fwmark := c.Int(defs.OptionFwmark)
@@ -313,6 +315,7 @@ func SpeedTest(c *cli.Context) error {
 			wg.Add(1)
 			jobs <- PingJob{Index: idx, Server: server}
 		}
+		close(jobs)
 
 		go func() {
 			wg.Wait()
@@ -353,15 +356,14 @@ func SpeedTest(c *cli.Context) error {
 }
 
 func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string, noICMP bool) {
-	for {
-		job := <-jobs
+	for job := range jobs {
 		server := job.Server
 		// get the URL of the speed test server from the JSON
 		u, err := server.GetURL()
 		if err != nil {
 			log.Debugf("Server URL is invalid for %s (%s), skipping", server.Name, server.Server)
 			wg.Done()
-			return
+			continue
 		}
 
 		// check the server is up by accessing the ping URL and checking its returned value == empty and status code == 200
@@ -374,7 +376,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			if err != nil {
 				log.Debugf("Can't ping server %s (%s), skipping", server.Name, u.Hostname())
 				wg.Done()
-				return
+				continue
 			}
 			// return result
 			results <- PingResult{Index: job.Index, Ping: ping}
@@ -406,7 +408,7 @@ func getServerList(forceScheme int, serverList string, excludes, specific []int,
 		return nil, err
 	}
 
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +427,7 @@ func getLocalServersReader(forceScheme int, reader io.ReadCloser, excludes, spec
 
 	var servers []defs.Server
 
-	b, err := ioutil.ReadAll(reader)
+	b, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}

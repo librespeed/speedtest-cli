@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -94,7 +94,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					return err
 				}
 				downloadValue = download
-				bytesRead = uint64(br)
+				bytesRead = br
 			}
 
 			// get upload value
@@ -109,7 +109,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					return err
 				}
 				uploadValue = upload
-				bytesWritten = uint64(bw)
+				bytesWritten = bw
 			}
 
 			// print result if --simple is given
@@ -172,7 +172,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
-				rep.Client = report.Client{ispInfo.RawISPInfo}
+				rep.Client = report.Client{IPInfoResponse: ispInfo.RawISPInfo}
 				rep.Client.Readme = ""
 
 				reps_json = append(reps_json, rep)
@@ -294,7 +294,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	}
 	defer resp.Body.Close()
 
-	id, err := ioutil.ReadAll(resp.Body)
+	id, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Errorf("Error when reading HTTP request: %s", err)
 		return "", err

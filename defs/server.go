@@ -1,13 +1,13 @@
 package defs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"net/http"
 	"net/url"
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
-	"github.com/go-ping/ping"
+	probing "github.com/prometheus-community/pro-bing"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,7 +40,7 @@ type Server struct {
 func (s *Server) IsUp() bool {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("Check backend is up took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("Check backend is up took %s", time.Since(t).String())
 	}()
 
 	u, _ := s.GetURL()
@@ -59,7 +59,7 @@ func (s *Server) IsUp() bool {
 		return false
 	}
 	defer resp.Body.Close()
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil || len(b) > 0 {
 		log.Debugf("Failed when parsing get IP result: %s", b)
 		return false
@@ -72,7 +72,7 @@ func (s *Server) IsUp() bool {
 func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, float64, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("ICMP ping took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("ICMP ping took %s", time.Since(t).String())
 	}()
 
 	if s.NoICMP {
@@ -86,7 +86,12 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		return 0, 0, err
 	}
 
-	p := ping.New(u.Hostname())
+	p, err := probing.NewPinger(u.Hostname())
+	if err != nil {
+		log.Debugf("Failed to resolve ping target: %s", err)
+		log.Debug("Will try TCP ping")
+		return s.PingAndJitter(count + 2)
+	}
 	p.SetNetwork(network)
 	p.Count = count
 	p.Timeout = time.Duration(count) * time.Second
@@ -132,7 +137,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("TCP ping took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("TCP ping took %s", time.Since(t).String())
 	}()
 
 	u, err := s.GetURL()
@@ -158,7 +163,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 			log.Debugf("Failed when making HTTP request: %s", err)
 			return 0, 0, err
 		}
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		end := time.Now()
 
@@ -192,7 +197,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chunks int, duration time.Duration) (float64, uint64, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("Download took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("Download took %s", time.Since(t).String())
 	}()
 
 	counter := NewCounter()
@@ -222,13 +227,16 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	downloadDone := make(chan struct{}, requests)
 
 	doDownload := func() {
-		resp, err := http.DefaultClient.Do(req)
+		reqClone := req.Clone(ctx)
+		resp, err := http.DefaultClient.Do(reqClone)
 		if err != nil {
-			log.Debugf("Failed when making HTTP request: %s", err)
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				log.Debugf("Failed when making HTTP request: %s", err)
+			}
 		} else {
 			defer resp.Body.Close()
 
-			if _, err = io.Copy(ioutil.Discard, io.TeeReader(resp.Body, counter)); err != nil {
+			if _, err = io.Copy(io.Discard, io.TeeReader(resp.Body, counter)); err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					log.Debugf("Failed when reading HTTP response: %s", err)
 				}
@@ -270,7 +278,7 @@ Loop:
 	for {
 		select {
 		case <-timeout:
-			ctx.Done()
+			cancel()
 			break Loop
 		case <-downloadDone:
 			go doDownload()
@@ -284,7 +292,7 @@ Loop:
 func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int, uploadSize int, duration time.Duration) (float64, uint64, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("Upload took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("Upload took %s", time.Since(t).String())
 	}()
 
 	counter := NewCounter()
@@ -307,23 +315,32 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	u.Path = path.Join(u.Path, s.UploadURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), counter)
-	if err != nil {
-		log.Debugf("Failed when creating HTTP request: %s", err)
-		return 0, 0, err
-	}
-	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Accept-Encoding", "identity")
 
 	uploadDone := make(chan struct{}, requests)
 
 	doUpload := func() {
-		resp, err := http.DefaultClient.Do(req)
+		var bodyReader io.Reader
+		if noPrealloc {
+			bodyReader = &SeekWrapper{rand.Reader}
+		} else {
+			bodyReader = bytes.NewReader(counter.Payload())
+		}
+		countingReader := io.TeeReader(bodyReader, counter)
+
+		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), countingReader)
+		if err != nil {
+			log.Debugf("Failed when creating HTTP request: %s", err)
+			return
+		}
+		uploadReq.Header.Set("User-Agent", UserAgent)
+		uploadReq.Header.Set("Accept-Encoding", "identity")
+
+		resp, err := http.DefaultClient.Do(uploadReq)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			log.Debugf("Failed when making HTTP request: %s", err)
 		} else if err == nil {
 			defer resp.Body.Close()
-			if _, err := io.Copy(ioutil.Discard, resp.Body); err != nil {
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 				log.Debugf("Failed when reading HTTP response: %s", err)
 			}
 
@@ -363,7 +380,7 @@ Loop:
 	for {
 		select {
 		case <-timeout:
-			ctx.Done()
+			cancel()
 			break Loop
 		case <-uploadDone:
 			go doUpload()
@@ -377,7 +394,7 @@ Loop:
 func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("Get IP info took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("Get IP info took %s", time.Since(t).String())
 	}()
 
 	var ipInfo GetIPResult
@@ -406,7 +423,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	}
 	defer resp.Body.Close()
 
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Debugf("Failed when reading HTTP response: %s", err)
 		return nil, err
@@ -427,7 +444,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 func (s *Server) GetURL() (*url.URL, error) {
 	t := time.Now()
 	defer func() {
-		s.TLog.Logf("Parse server URL took %s", time.Now().Sub(t).String())
+		s.TLog.Logf("Parse server URL took %s", time.Since(t).String())
 	}()
 
 	u, err := url.Parse(s.Server)
