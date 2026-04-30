@@ -433,7 +433,16 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			log.Debugf("Failed when parsing get IP result: %s", err)
 			log.Debugf("Received payload: %s", b)
-			ipInfo.ProcessedString = string(b[:])
+			// try to extract processedString even if full parse fails
+			// (e.g. when rawIspInfo is "" instead of an object)
+			var partial struct {
+				ProcessedString string `json:"processedString"`
+			}
+			if err2 := json.Unmarshal(b, &partial); err2 == nil && partial.ProcessedString != "" {
+				ipInfo.ProcessedString = partial.ProcessedString
+			} else {
+				ipInfo.ProcessedString = string(b)
+			}
 		}
 	}
 
