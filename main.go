@@ -150,13 +150,16 @@ func main() {
 			},
 			&cli.BoolFlag{
 				Name: defs.OptionSecure,
-				Usage: "Use HTTPS instead of HTTP when communicating with\n" +
-					"\tLibreSpeed.org operated servers",
+				Usage: "Force HTTPS for every test server, whichever scheme the\n" +
+					"\tserver list gives. Does not affect how the server list\n" +
+					"\titself is fetched",
 			},
 			&cli.BoolFlag{
 				Name: defs.OptionInsecure,
-				Usage: "Use HTTP instead of HTTPS when communicating with\n" +
-					"\tLibreSpeed.org operated servers",
+				Usage: "Force HTTP for every test server, whichever scheme the\n" +
+					"\tserver list gives. Does not affect how the server list\n" +
+					"\titself is fetched; use --" + defs.OptionServerJSON + " with an\n" +
+					"\thttp:// URL for that",
 			},
 			&cli.StringFlag{
 				Name: defs.OptionCACert,
