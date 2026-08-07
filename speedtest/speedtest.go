@@ -283,9 +283,11 @@ func SpeedTest(c *cli.Context) error {
 		for _, svr := range servers {
 			var sponsorMsg string
 			if svr.Sponsor() != "" {
-				sponsorMsg = fmt.Sprintf(" [Sponsor: %s]", svr.Sponsor())
+				sponsorMsg = fmt.Sprintf(" [Sponsor: %s]", output.Sanitize(svr.Sponsor()))
 			}
-			output.WriteOut("%d: %s (%s) %s\n", svr.ID, svr.Name, svr.Server, sponsorMsg)
+			// --list goes to stdout, so a newline smuggled into a server name
+			// would forge an entry for anything parsing it
+			output.WriteOut("%d: %s (%s) %s\n", svr.ID, output.Sanitize(svr.Name), output.Sanitize(svr.Server), sponsorMsg)
 		}
 		return nil
 	}
@@ -360,7 +362,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 		// get the URL of the speed test server from the JSON
 		u, err := server.GetURL()
 		if err != nil {
-			output.WriteDebug("Server URL is invalid for %s (%s), skipping\n", server.Name, server.Server)
+			output.WriteDebug("Server URL is invalid for %s (%s), skipping\n", output.Sanitize(server.Name), output.Sanitize(server.Server))
 			wg.Done()
 			continue
 		}
@@ -373,7 +375,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			// if server is up, get ping
 			ping, _, err := server.ICMPPingAndJitter(1, srcIp, network)
 			if err != nil {
-				output.WriteDebug("Can't ping server %s (%s), skipping\n", server.Name, u.Hostname())
+				output.WriteDebug("Can't ping server %s (%s), skipping\n", output.Sanitize(server.Name), output.Sanitize(u.Hostname()))
 				wg.Done()
 				continue
 			}
@@ -381,7 +383,7 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			results <- PingResult{Index: job.Index, Ping: ping}
 			wg.Done()
 		} else {
-			output.WriteDebug("Server %s (%s) doesn't seem to be up, skipping\n", server.Name, u.Hostname())
+			output.WriteDebug("Server %s (%s) doesn't seem to be up, skipping\n", output.Sanitize(server.Name), output.Sanitize(u.Hostname()))
 			wg.Done()
 		}
 	}

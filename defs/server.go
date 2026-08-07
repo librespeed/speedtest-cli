@@ -11,8 +11,10 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -61,7 +63,7 @@ func (s *Server) IsUp() bool {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil || len(b) > 0 {
-		output.WriteDebug("Failed when parsing get IP result: %s\n", b)
+		output.WriteDebug("Failed when parsing get IP result: %s\n", output.Sanitize(string(b)))
 		return false
 	}
 	// only return online if the ping URL returns nothing and 200
@@ -76,7 +78,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	}()
 
 	if s.NoICMP {
-		output.WriteDebug("Skipping ICMP for server %s, will use HTTP ping\n", s.Name)
+		output.WriteDebug("Skipping ICMP for server %s, will use HTTP ping\n", output.Sanitize(s.Name))
 		return s.PingAndJitter(count + 2)
 	}
 
@@ -126,7 +128,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 
 	if len(stats.Rtts) == 0 {
 		s.NoICMP = true
-		output.WriteDebug("No ICMP pings returned for server %s (%s), trying TCP ping\n", s.Name, u.Hostname())
+		output.WriteDebug("No ICMP pings returned for server %s (%s), trying TCP ping\n", output.Sanitize(s.Name), output.Sanitize(u.Hostname()))
 		return s.PingAndJitter(count + 2)
 	}
 
@@ -226,29 +228,43 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 
 	downloadDone := make(chan struct{}, requests)
 
+	var wg sync.WaitGroup
+
 	doDownload := func() {
+		defer wg.Done()
+
 		reqClone := req.Clone(ctx)
 		resp, err := http.DefaultClient.Do(reqClone)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				output.WriteDebug("Failed when making HTTP request: %s\n", err)
 			}
-		} else {
-			defer resp.Body.Close()
-
-			if _, err = io.Copy(io.Discard, io.TeeReader(resp.Body, counter)); err != nil {
-				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-					output.WriteDebug("Failed when reading HTTP response: %s\n", err)
-				}
-			}
-
-			downloadDone <- struct{}{}
+			return
 		}
+		defer resp.Body.Close()
+
+		if _, err = io.Copy(io.Discard, io.TeeReader(resp.Body, counter)); err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+			}
+		}
+
+		// let the main loop start a replacement request, but never block on it
+		// once the test is over, otherwise this goroutine is leaked
+		select {
+		case downloadDone <- struct{}{}:
+		case <-ctx.Done():
+		}
+	}
+
+	spawnDownload := func() {
+		wg.Add(1)
+		go doDownload()
 	}
 
 	counter.Start()
 	if !silent {
-		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond)
+		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Downloading...  "
 		pb.PostUpdate = func(s *spinner.Spinner) {
 			if useBytes {
@@ -259,18 +275,21 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		}
 
 		pb.Start()
+		// print the rate ourselves instead of via pb.FinalMSG: the spinner only
+		// prints it when it was actually running, which it isn't when stderr is
+		// not a terminal
 		defer func() {
-			if useBytes {
-				pb.FinalMSG = fmt.Sprintf("Download rate:\t%s\n", counter.AvgHumanize())
-			} else {
-				pb.FinalMSG = fmt.Sprintf("Download rate:\t%.2f Mbps\n", counter.AvgMbps())
-			}
 			pb.Stop()
+			if useBytes {
+				output.WriteUI("Download rate:\t%s\n", counter.AvgHumanize())
+			} else {
+				output.WriteUI("Download rate:\t%.2f Mbps\n", counter.AvgMbps())
+			}
 		}()
 	}
 
 	for i := 0; i < requests; i++ {
-		go doDownload()
+		spawnDownload()
 		time.Sleep(200 * time.Millisecond)
 	}
 	timeout := time.After(duration)
@@ -281,9 +300,13 @@ Loop:
 			cancel()
 			break Loop
 		case <-downloadDone:
-			go doDownload()
+			spawnDownload()
 		}
 	}
+
+	// let the cancelled requests unwind before reading the counter, so the
+	// result doesn't change under us while it's being reported
+	wg.Wait()
 
 	return counter.AvgMbps(), counter.Total(), nil
 }
@@ -301,8 +324,9 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 	if noPrealloc {
 		output.WriteUI("Pre-allocation is disabled, performance might be lower!\n")
-		counter.reader = &SeekWrapper{rand.Reader}
 	} else {
+		// each request reads from this shared payload; without it they stream
+		// straight from crypto/rand instead
 		counter.GenerateBlob()
 	}
 
@@ -318,7 +342,11 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 	uploadDone := make(chan struct{}, requests)
 
+	var wg sync.WaitGroup
+
 	doUpload := func() {
+		defer wg.Done()
+
 		var bodyReader io.Reader
 		if noPrealloc {
 			bodyReader = &SeekWrapper{rand.Reader}
@@ -336,21 +364,34 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		uploadReq.Header.Set("Accept-Encoding", "identity")
 
 		resp, err := http.DefaultClient.Do(uploadReq)
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			output.WriteDebug("Failed when making HTTP request: %s\n", err)
-		} else if err == nil {
-			defer resp.Body.Close()
-			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				output.WriteDebug("Failed when making HTTP request: %s\n", err)
 			}
-
-			uploadDone <- struct{}{}
+			return
 		}
+		defer resp.Body.Close()
+
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+		}
+
+		// let the main loop start a replacement request, but never block on it
+		// once the test is over, otherwise this goroutine is leaked
+		select {
+		case uploadDone <- struct{}{}:
+		case <-ctx.Done():
+		}
+	}
+
+	spawnUpload := func() {
+		wg.Add(1)
+		go doUpload()
 	}
 
 	counter.Start()
 	if !silent {
-		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond)
+		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Uploading...  "
 		pb.PostUpdate = func(s *spinner.Spinner) {
 			if useBytes {
@@ -361,18 +402,21 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		}
 
 		pb.Start()
+		// print the rate ourselves instead of via pb.FinalMSG: the spinner only
+		// prints it when it was actually running, which it isn't when stderr is
+		// not a terminal
 		defer func() {
-			if useBytes {
-				pb.FinalMSG = fmt.Sprintf("Upload rate:\t%s\n", counter.AvgHumanize())
-			} else {
-				pb.FinalMSG = fmt.Sprintf("Upload rate:\t%.2f Mbps\n", counter.AvgMbps())
-			}
 			pb.Stop()
+			if useBytes {
+				output.WriteUI("Upload rate:\t%s\n", counter.AvgHumanize())
+			} else {
+				output.WriteUI("Upload rate:\t%.2f Mbps\n", counter.AvgMbps())
+			}
 		}()
 	}
 
 	for i := 0; i < requests; i++ {
-		go doUpload()
+		spawnUpload()
 		time.Sleep(200 * time.Millisecond)
 	}
 	timeout := time.After(duration)
@@ -383,9 +427,13 @@ Loop:
 			cancel()
 			break Loop
 		case <-uploadDone:
-			go doUpload()
+			spawnUpload()
 		}
 	}
+
+	// let the cancelled requests unwind before reading the counter, so the
+	// result doesn't change under us while it's being reported
+	wg.Wait()
 
 	return counter.AvgMbps(), counter.Total(), nil
 }
@@ -432,7 +480,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	if len(b) > 0 {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			output.WriteDebug("Failed when parsing get IP result: %s\n", err)
-			output.WriteDebug("Received payload: %s\n", b)
+			output.WriteDebug("Received payload: %s\n", output.Sanitize(string(b)))
 			// try to extract processedString even if full parse fails
 			// (e.g. when rawIspInfo is "" instead of an object)
 			var partial struct {
@@ -473,7 +521,7 @@ func (s *Server) Sponsor() string {
 		if s.SponsorURL != "" {
 			su, err := url.Parse(s.SponsorURL)
 			if err != nil {
-				output.WriteDebug("Sponsor URL is invalid: %s\n", s.SponsorURL)
+				output.WriteDebug("Sponsor URL is invalid: %s\n", output.Sanitize(s.SponsorURL))
 			} else {
 				if su.Scheme == "" {
 					su.Scheme = "https"

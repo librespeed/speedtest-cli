@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // Default is the package-level output writer used by all package functions.
@@ -126,4 +127,27 @@ func (w *Writer) Fatalf(format string, args ...interface{}) {
 	fmt.Fprintf(w.ui, format, args...)
 	fmt.Fprintln(w.ui)
 	os.Exit(1)
+}
+
+// --- Sanitize: make server-supplied strings safe to display ---
+
+// Sanitize strips control characters from a string so it can be printed
+// without letting a remote party drive the terminal.
+//
+// Server names, sponsor strings and the getIP response all come off the wire
+// (over plain HTTP for schemeless servers), so they are attacker-influenced.
+// Left raw, an embedded ESC sequence can rewrite earlier lines, hide text or
+// recolour the output, and an embedded newline can forge an extra entry in
+// --list output that a script would then parse as real.
+//
+// Dropped: C0 controls (including ESC, CR, LF and TAB), DEL, and C1 controls
+// (0x80-0x9F, where 0x9B doubles as CSI on some terminals). Printable Unicode
+// is left alone.
+func Sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
 }

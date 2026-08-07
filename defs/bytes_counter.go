@@ -1,53 +1,32 @@
 package defs
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"math/rand/v2"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// BytesCounter implements io.Reader and io.Writer interface, for counting bytes being read/written in HTTP requests
+// BytesCounter implements the io.Writer interface, for counting bytes being read/written in HTTP requests.
+// It is only ever plugged into an io.TeeReader, so the transfer itself is driven by the wrapped reader.
 type BytesCounter struct {
 	start      time.Time
-	pos        int
-	total      uint64
+	total      atomic.Uint64
 	payload    []byte
-	reader     io.ReadSeeker
 	mebi       bool
 	uploadSize int
-
-	lock *sync.Mutex
 }
 
 func NewCounter() *BytesCounter {
-	return &BytesCounter{
-		lock: &sync.Mutex{},
-	}
+	return &BytesCounter{}
 }
 
 // Write implements io.Writer
 func (c *BytesCounter) Write(p []byte) (int, error) {
 	n := len(p)
-	atomic.AddUint64(&c.total, uint64(n))
+	c.total.Add(uint64(n))
 	return n, nil
-}
-
-// Read implements io.Reader
-func (c *BytesCounter) Read(p []byte) (int, error) {
-	c.lock.Lock()
-	n, err := c.reader.Read(p)
-	c.total += uint64(n)
-	c.pos += n
-	if c.pos == c.uploadSize {
-		c.resetReader()
-	}
-	c.lock.Unlock()
-
-	return n, err
 }
 
 // SetBase sets the base for dividing bytes into megabyte or mebibyte
@@ -62,7 +41,7 @@ func (c *BytesCounter) SetUploadSize(uploadSize int) {
 
 // AvgBytes returns the average bytes/second
 func (c *BytesCounter) AvgBytes() float64 {
-	return float64(c.total) / time.Since(c.start).Seconds()
+	return float64(c.total.Load()) / time.Since(c.start).Seconds()
 }
 
 // AvgMbps returns the average mbits/second
@@ -99,17 +78,9 @@ func (c *BytesCounter) Payload() []byte {
 	return c.payload
 }
 
-// GenerateBlob generates a random byte array of `uploadSize` in the `payload` field, and sets the `reader` field to
-// read from it
+// GenerateBlob generates a random byte array of `uploadSize` in the `payload` field
 func (c *BytesCounter) GenerateBlob() {
 	c.payload = getRandomData(c.uploadSize)
-	c.reader = bytes.NewReader(c.payload)
-}
-
-// resetReader resets the `reader` field to 0 position
-func (c *BytesCounter) resetReader() (int64, error) {
-	c.pos = 0
-	return c.reader.Seek(0, 0)
 }
 
 // Start will set the `start` field to current time
@@ -119,12 +90,12 @@ func (c *BytesCounter) Start() {
 
 // Total returns the total bytes read/written
 func (c *BytesCounter) Total() uint64 {
-	return atomic.LoadUint64(&c.total)
+	return c.total.Load()
 }
 
 // CurrentSpeed returns the current bytes/second
 func (c *BytesCounter) CurrentSpeed() float64 {
-	return float64(c.total) / time.Since(c.start).Seconds()
+	return float64(c.total.Load()) / time.Since(c.start).Seconds()
 }
 
 // SeekWrapper is a wrapper around io.Reader to give it a noop io.Seeker interface
