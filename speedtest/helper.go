@@ -16,8 +16,8 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/gocarina/gocsv"
 	"github.com/librespeed/speedtest-cli/defs"
-	"github.com/librespeed/speedtest-cli/report"
 	"github.com/librespeed/speedtest-cli/output"
+	"github.com/librespeed/speedtest-cli/report"
 	"github.com/urfave/cli/v2"
 )
 
@@ -113,14 +113,14 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			}
 
 			// print result if --simple is given
-		if c.Bool(defs.OptionSimple) {
-			if c.Bool(defs.OptionBytes) {
-				useMebi := c.Bool(defs.OptionMebiBytes)
-				output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%s\nUpload rate:\t%s\n", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
-			} else {
-				output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps\n", p, jitter, downloadValue, uploadValue)
+			if c.Bool(defs.OptionSimple) {
+				if c.Bool(defs.OptionBytes) {
+					useMebi := c.Bool(defs.OptionMebiBytes)
+					output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%s\nUpload rate:\t%s\n", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
+				} else {
+					output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps\n", p, jitter, downloadValue, uploadValue)
+				}
 			}
-		}
 
 			// print share link if --share is given
 			var shareLink string

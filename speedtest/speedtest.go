@@ -33,8 +33,8 @@ const (
 	defaultTelemetryShare  = "/results/"
 
 	forceNothing = 0
-	forceHttps = 1
-	forceHttp = 2
+	forceHttps   = 1
+	forceHttp    = 2
 )
 
 type PingJob struct {
