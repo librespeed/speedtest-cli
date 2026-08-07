@@ -47,18 +47,21 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 
 		output.WriteUI("Selected server: %s [%s]\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
+output.WriteDebug("Testing against %s (%s)\n", output.Sanitize(currentServer.Name), output.Sanitize(u.String()))
 
 		if sponsorMsg := currentServer.Sponsor(); sponsorMsg != "" {
 			output.WriteUI("Sponsored by: %s\n", output.Sanitize(sponsorMsg))
 		}
 
 		if currentServer.IsUp() {
+			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
 				output.WriteError("Failed to get IP info: %s\n", err)
 				return err
 			}
 			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
+output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 			// get ping and jitter value
 			var pb *spinner.Spinner
@@ -71,11 +74,20 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			// skip ICMP if option given
 			currentServer.NoICMP = noICMP
 
+			// The spinner is the only sign of progress, and it is not started
+			// in silent mode, so --json, --csv and --simple runs otherwise show
+			// nothing at all until they finish. Report each phase under --debug
+			// instead, with the timings and counts the spinner cannot carry.
+			output.WriteDebug("Ping test starting: %d pings, ICMP: %t\n", pingCount, !noICMP)
+			pingStart := time.Now()
+
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {
 				output.WriteError("Failed to get ping and jitter: %s\n", err)
 				return err
 			}
+
+			output.WriteDebug("Ping test finished in %s: ping %.2f ms, jitter %.2f ms\n", time.Since(pingStart).Round(time.Millisecond), p, jitter)
 
 			if pb != nil {
 				// print the result ourselves instead of via pb.FinalMSG: the
@@ -90,7 +102,11 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			var bytesRead uint64
 			if c.Bool(defs.OptionNoDownload) {
 				output.WriteUI("Download test is disabled\n")
+				output.WriteDebug("Download test skipped\n")
 			} else {
+				output.WriteDebug("Download test starting: %d stream(s), %d chunk(s), up to %ds\n", c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), c.Int(defs.OptionDuration))
+				downloadStart := time.Now()
+
 				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
 					output.WriteError("Failed to get download speed: %s\n", err)
@@ -98,6 +114,8 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				}
 				downloadValue = download
 				bytesRead = br
+
+				output.WriteDebug("Download test finished in %s: %s, %d byte(s) received\n", time.Since(downloadStart).Round(time.Millisecond), humanizeRate(download, c), br)
 			}
 
 			// get upload value
@@ -105,7 +123,11 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			var bytesWritten uint64
 			if c.Bool(defs.OptionNoUpload) {
 				output.WriteUI("Upload test is disabled\n")
+				output.WriteDebug("Upload test skipped\n")
 			} else {
+				output.WriteDebug("Upload test starting: %d stream(s), %d KiB per request, up to %ds\n", c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), c.Int(defs.OptionDuration))
+				uploadStart := time.Now()
+
 				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
 					output.WriteError("Failed to get upload speed: %s\n", err)
@@ -113,6 +135,8 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				}
 				uploadValue = upload
 				bytesWritten = bw
+
+				output.WriteDebug("Upload test finished in %s: %s, %d byte(s) sent\n", time.Since(uploadStart).Round(time.Millisecond), humanizeRate(upload, c), bw)
 			}
 
 			// print result if --simple is given
@@ -321,6 +345,16 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 
 		return resultUrl.String(), nil
 	}
+}
+
+// humanizeRate formats a rate the same way the run's own result will be
+// reported, so a debug line cannot appear to contradict the JSON, CSV or
+// --simple output sitting next to it.
+func humanizeRate(mbps float64, c *cli.Context) string {
+	if c.Bool(defs.OptionBytes) {
+		return humanizeMbps(mbps, c.Bool(defs.OptionMebiBytes))
+	}
+	return fmt.Sprintf("%.2f Mbps", mbps)
 }
 
 func humanizeMbps(mbps float64, useMebi bool) string {
