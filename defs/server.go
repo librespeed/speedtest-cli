@@ -63,7 +63,9 @@ func (s *Server) IsUp() bool {
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil || len(b) > 0 {
-		output.WriteDebug("Failed when parsing get IP result: %s\n", output.Sanitize(string(b)))
+		// %q rather than Sanitize: this is a raw response body where newlines are
+		// legitimate, and quoting escapes control chars without losing them
+		output.WriteDebug("Failed when parsing get IP result: %q\n", b)
 		return false
 	}
 	// only return online if the ping URL returns nothing and 200
@@ -373,7 +375,10 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		defer resp.Body.Close()
 
 		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-			output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+			// cancellation is how the test ends, so it is not a failure
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+			}
 		}
 
 		// let the main loop start a replacement request, but never block on it
@@ -480,7 +485,8 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	if len(b) > 0 {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			output.WriteDebug("Failed when parsing get IP result: %s\n", err)
-			output.WriteDebug("Received payload: %s\n", output.Sanitize(string(b)))
+			// %q rather than Sanitize: see IsUp
+			output.WriteDebug("Received payload: %q\n", b)
 			// try to extract processedString even if full parse fails
 			// (e.g. when rawIspInfo is "" instead of an object)
 			var partial struct {
