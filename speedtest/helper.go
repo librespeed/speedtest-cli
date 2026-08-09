@@ -197,13 +197,14 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		if err := gocsv.MarshalWithoutHeaders(&reps_csv, &buf); err != nil {
 			output.WriteError("Error generating CSV report: %s\n", err)
 		} else {
-			os.Stdout.WriteString(strings.TrimRight(buf.String(), "\n\r"))
+			os.Stdout.WriteString(strings.TrimRight(buf.String(), "\n\r") + "\n")
 		}
 	} else if c.Bool(defs.OptionJSON) {
 		if b, err := json.Marshal(&reps_json); err != nil {
 			output.WriteError("Error generating JSON report: %s\n", err)
 		} else {
 			os.Stdout.Write(b[:])
+			os.Stdout.WriteString("\n")
 		}
 	}
 
