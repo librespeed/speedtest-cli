@@ -73,7 +73,6 @@ func SpeedTest(c *cli.Context) error {
 		output.WriteOut("Licensed under GNU Lesser General Public License v3.0\n")
 		output.WriteOut("LibreSpeed\tCopyright (C) 2016-2020 Federico Dossena\n")
 		output.WriteOut("librespeed-cli\tCopyright (C) 2020 Maddie Zhan\n")
-		output.WriteOut("librespeed.org\tCopyright (C)\n")
 		return nil
 	}
 
