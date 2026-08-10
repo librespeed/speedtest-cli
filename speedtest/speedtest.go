@@ -68,7 +68,15 @@ func SpeedTest(c *cli.Context) error {
 
 	// print version
 	if c.Bool(defs.OptionVersion) {
-		output.WriteOut("%s %s (built on %s)\n", defs.ProgName, defs.ProgVersion, defs.BuildDate)
+		// The build date is one of the values a build script fills in, and a
+		// build that does not set it should not be made to claim an empty one.
+		// Distribution packages commonly pass the name and version without it,
+		// which today prints a bare "(built on )".
+		if defs.BuildDate == "" {
+			output.WriteOut("%s %s\n", defs.ProgName, defs.ProgVersion)
+		} else {
+			output.WriteOut("%s %s (built on %s)\n", defs.ProgName, defs.ProgVersion, defs.BuildDate)
+		}
 		output.WriteOut("https://github.com/librespeed/speedtest-cli\n")
 		output.WriteOut("Licensed under GNU Lesser General Public License v3.0\n")
 		output.WriteOut("LibreSpeed\tCopyright (C) 2016-2020 Federico Dossena\n")
