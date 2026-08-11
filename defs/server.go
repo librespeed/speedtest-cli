@@ -75,6 +75,13 @@ func (s *Server) IsUp() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// rttMillis converts a round-trip time to milliseconds without discarding the
+// fraction. Duration.Milliseconds truncates to whole milliseconds, which on a
+// link faster than that leaves nothing to report.
+func rttMillis(d time.Duration) float64 {
+	return float64(d) / float64(time.Millisecond)
+}
+
 // ICMPPingAndJitter pings the server via ICMP echos and calculate the average ping and jitter
 func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, float64, error) {
 	t := time.Now()
@@ -128,7 +135,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	var lastPing, jitter float64
 	for idx, rtt := range stats.Rtts {
 		if idx != 0 {
-			instJitter := math.Abs(lastPing - float64(rtt.Milliseconds()))
+			instJitter := math.Abs(lastPing - rttMillis(rtt))
 			if idx > 1 {
 				if jitter > instJitter {
 					jitter = jitter*0.7 + instJitter*0.3
@@ -137,7 +144,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 				}
 			}
 		}
-		lastPing = float64(rtt.Milliseconds())
+		lastPing = rttMillis(rtt)
 	}
 
 	if len(stats.Rtts) == 0 {
@@ -146,7 +153,7 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		return s.PingAndJitter(count + 2)
 	}
 
-	return float64(stats.AvgRtt.Milliseconds()), jitter, nil
+	return rttMillis(stats.AvgRtt), jitter, nil
 }
 
 // addressFamily names the IP version of an address, for reporting which path a
@@ -218,7 +225,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 		resp.Body.Close()
 		end := time.Now()
 
-		pings = append(pings, float64(end.Sub(start).Milliseconds()))
+		pings = append(pings, rttMillis(end.Sub(start)))
 	}
 
 	for _, addr := range remotes {
