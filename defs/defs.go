@@ -1,6 +1,9 @@
 package defs
 
-import "runtime"
+import (
+	"encoding/json"
+	"runtime"
+)
 
 var (
 	// values to be filled in by build script
@@ -18,8 +21,8 @@ var (
 
 // GetIPResults represents the returned JSON from backend server's getIP.php endpoint
 type GetIPResult struct {
-	ProcessedString string         `json:"processedString"`
-	RawISPInfo      IPInfoResponse `json:"rawIspInfo"`
+	ProcessedString string          `json:"processedString"`
+	RawISPInfo      json.RawMessage `json:"rawIspInfo"`
 }
 
 // IPInfoResponse represents the returned JSON from IPInfo.io's API
@@ -34,4 +37,15 @@ type IPInfoResponse struct {
 	Postal       string `json:"postal"`
 	Timezone     string `json:"timezone"`
 	Readme       string `json:"readme,omitempty"`
+}
+
+// IP returns the client address from the raw ISP response. The backend may
+// return rawIspInfo as an object, an empty string, or not at all; anything
+// that does not parse as an object yields an empty address.
+func (g *GetIPResult) IP() string {
+	var info IPInfoResponse
+	if len(g.RawISPInfo) > 0 {
+		json.Unmarshal(g.RawISPInfo, &info)
+	}
+	return info.IP
 }

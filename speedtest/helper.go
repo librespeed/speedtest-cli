@@ -184,7 +184,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				rep.Download = math.Round(downloadValue*100) / 100
 				rep.Upload = math.Round(uploadValue*100) / 100
 				rep.Share = shareLink
-				rep.IP = ispInfo.RawISPInfo.IP
+				rep.IP = ispInfo.IP()
 
 				reps_csv = append(reps_csv, rep)
 			} else if c.Bool(defs.OptionJSON) {
@@ -203,7 +203,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
-				rep.Client = report.Client{IPInfoResponse: ispInfo.RawISPInfo}
+				rep.Client = report.NewClient(ispInfo.RawISPInfo)
 				rep.Client.Readme = ""
 
 				reps_json = append(reps_json, rep)

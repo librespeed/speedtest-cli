@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/librespeed/speedtest-cli/defs"
@@ -29,4 +30,15 @@ type Server struct {
 // Client represents the speed test client's information
 type Client struct {
 	defs.IPInfoResponse
+}
+
+// NewClient builds a Client from the raw ISP info payload a backend returned.
+// The payload may be an object, an empty string, or absent; anything that does
+// not parse as an object yields an empty Client rather than an error.
+func NewClient(raw json.RawMessage) Client {
+	var c Client
+	if len(raw) > 0 {
+		json.Unmarshal(raw, &c.IPInfoResponse)
+	}
+	return c
 }

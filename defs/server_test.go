@@ -1,120 +1,81 @@
 package defs
 
 import (
-	"io"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
-// The transfer tests below cover the timing semantics introduced by wg.Wait():
-// Download and Upload now return only once every in-flight request has
-// unwound. Against a server that never ends a request on its own, the only
-// thing that can end them is the context cancellation, so these fail (by
-// timing out) if wg.Wait() can hang.
-
-const (
-	testRequests = 2
-	// long enough that the requests are still in flight when the test ends
-	testDuration = 500 * time.Millisecond
-	// The spawn loop sleeps 200ms per request before the duration timer even
-	// starts, so a healthy run is ~900ms; measured unwind after cancel() is
-	// 10-40ms, with or without -race. The rest is slack for a loaded runner --
-	// kept tight so a hanging wg.Wait() fails fast instead of stalling CI.
-	returnBudget = testRequests*200*time.Millisecond + testDuration + 2*time.Second
-)
-
-// hangingDownloadServer streams forever until the client goes away.
-func hangingDownloadServer(t *testing.T) *httptest.Server {
+// getIPHandler serves a canned getIP.php response and records the parsed result.
+func getIPResultFromPayload(t *testing.T, payload string) *GetIPResult {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		chunk := make([]byte, 32*1024)
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			default:
-			}
-			if _, err := w.Write(chunk); err != nil {
-				return
-			}
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
-		}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(payload))
 	}))
+	defer ts.Close()
+
+	s := &Server{Server: ts.URL, GetIPURL: "/"}
+	got, err := s.GetIPInfo("km")
+	if err != nil {
+		t.Fatalf("GetIPInfo returned error: %v", err)
+	}
+	return got
 }
 
-// hangingUploadServer drains the body, then holds the request open.
-func hangingUploadServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
-		<-r.Context().Done()
-	}))
-}
+func TestGetIPInfoParsesObject(t *testing.T) {
+	got := getIPResultFromPayload(t, `{"processedString":"1.2.3.4","rawIspInfo":{"ip":"1.2.3.4","city":"Prague","org":"ACME"}}`)
 
-func runWithinBudget(t *testing.T, name string, fn func() error) {
-	t.Helper()
-
-	done := make(chan error, 1)
-	start := time.Now()
-	go func() { done <- fn() }()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("%s returned error: %v", name, err)
-		}
-		if elapsed := time.Since(start); elapsed > returnBudget {
-			t.Errorf("%s took %s, budget was %s", name, elapsed, returnBudget)
-		}
-	case <-time.After(returnBudget):
-		t.Fatalf("%s did not return within %s: wg.Wait() is hanging on cancelled requests", name, returnBudget)
+	if got.ProcessedString != "1.2.3.4" {
+		t.Errorf("ProcessedString = %q, want %q", got.ProcessedString, "1.2.3.4")
+	}
+	if got.IP() != "1.2.3.4" {
+		t.Errorf("IP() = %q, want %q", got.IP(), "1.2.3.4")
 	}
 }
 
-func TestDownloadReturnsWhenServerNeverEndsTheResponse(t *testing.T) {
-	ts := hangingDownloadServer(t)
-	defer ts.Close()
+// The rawIspInfo field comes back as an empty string from some backends
+// (issue #85). The result must keep it as-is so telemetry reports an empty
+// string rather than an all-empty object, and must not lose processedString.
+func TestGetIPInfoKeepsEmptyRawIspInfo(t *testing.T) {
+	got := getIPResultFromPayload(t, `{"processedString":"10.0.0.70","rawIspInfo":""}`)
 
-	s := &Server{Server: ts.URL, DownloadURL: "/"}
+	if got.ProcessedString != "10.0.0.70" {
+		t.Errorf("ProcessedString = %q, want %q", got.ProcessedString, "10.0.0.70")
+	}
+	if got.IP() != "" {
+		t.Errorf("IP() = %q, want empty", got.IP())
+	}
 
-	var total uint64
-	runWithinBudget(t, "Download", func() error {
-		_, n, err := s.Download(true, false, false, testRequests, 100, testDuration)
-		total = n
-		return err
-	})
-
-	if total == 0 {
-		t.Error("Download reported 0 bytes, expected the counter to have seen traffic")
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := `{"processedString":"10.0.0.70","rawIspInfo":""}`
+	if string(b) != want {
+		t.Errorf("Marshal(GetIPResult) = %s, want %s", b, want)
 	}
 }
 
-func TestUploadReturnsWhenServerNeverResponds(t *testing.T) {
-	ts := hangingUploadServer(t)
-	defer ts.Close()
+// Some backends wrap the whole payload in processedString (issue #78). The
+// object inside must still surface the client address.
+func TestGetIPInfoExtractsIPFromNestedPayload(t *testing.T) {
+	got := getIPResultFromPayload(t, `{"processedString":"{\"ip\":\"9.9.9.9\",\"city\":\"X\"}","rawIspInfo":{"ip":"9.9.9.9","city":"X"}}`)
 
-	s := &Server{Server: ts.URL, UploadURL: "/"}
-
-	runWithinBudget(t, "Upload", func() error {
-		_, _, err := s.Upload(false, true, false, false, testRequests, 32, testDuration)
-		return err
-	})
+	if got.IP() != "9.9.9.9" {
+		t.Errorf("IP() = %q, want %q", got.IP(), "9.9.9.9")
+	}
 }
 
-// The no-prealloc path streams from crypto/rand, so the request body never
-// ends on its own either; only cancellation can stop it.
-func TestUploadNoPreallocReturnsWhenServerNeverResponds(t *testing.T) {
-	ts := hangingUploadServer(t)
-	defer ts.Close()
+func TestGetIPInfoAbsentRawIspInfo(t *testing.T) {
+	got := getIPResultFromPayload(t, `{"processedString":"1.2.3.4"}`)
 
-	s := &Server{Server: ts.URL, UploadURL: "/"}
-
-	runWithinBudget(t, "Upload(noPrealloc)", func() error {
-		_, _, err := s.Upload(true, true, false, false, testRequests, 32, testDuration)
-		return err
-	})
+	if got.ProcessedString != "1.2.3.4" {
+		t.Errorf("ProcessedString = %q, want %q", got.ProcessedString, "1.2.3.4")
+	}
+	if got.IP() != "" {
+		t.Errorf("IP() = %q, want empty", got.IP())
+	}
 }

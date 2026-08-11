@@ -573,13 +573,20 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 			output.WriteDebug("Failed when parsing get IP result: %s\n", err)
 			// %q rather than Sanitize: see IsUp
 			output.WriteDebug("Received payload: %q\n", b)
-			// try to extract processedString even if full parse fails
-			// (e.g. when rawIspInfo is "" instead of an object)
+			// A server may return rawIspInfo as an empty string rather than an
+			// object (or wrap the whole payload in processedString); recover
+			// whatever fields parse instead of losing everything.
 			var partial struct {
-				ProcessedString string `json:"processedString"`
+				ProcessedString string          `json:"processedString"`
+				RawISPInfo      json.RawMessage `json:"rawIspInfo"`
 			}
-			if err2 := json.Unmarshal(b, &partial); err2 == nil && partial.ProcessedString != "" {
-				ipInfo.ProcessedString = partial.ProcessedString
+			if err2 := json.Unmarshal(b, &partial); err2 == nil {
+				if partial.ProcessedString != "" {
+					ipInfo.ProcessedString = partial.ProcessedString
+				} else {
+					ipInfo.ProcessedString = string(b)
+				}
+				ipInfo.RawISPInfo = partial.RawISPInfo
 			} else {
 				ipInfo.ProcessedString = string(b)
 			}
