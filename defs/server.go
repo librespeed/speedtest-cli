@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -113,6 +116,15 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 
 	stats := p.Statistics()
 
+	// Say which address the test actually reached. IPv4 and IPv6 can take
+	// different paths through the network, so a result is not fully described
+	// by the hostname it was measured against, and --json carries no client
+	// address to infer it from.
+	if stats.IPAddr != nil {
+		output.WriteDebug("Pinging %s over ICMP (%s)\n",
+			stats.IPAddr.String(), addressFamily(stats.IPAddr.String()))
+	}
+
 	var lastPing, jitter float64
 	for idx, rtt := range stats.Rtts {
 		if idx != 0 {
@@ -135,6 +147,24 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	}
 
 	return float64(stats.AvgRtt.Milliseconds()), jitter, nil
+}
+
+// addressFamily names the IP version of an address, for reporting which path a
+// measurement took. Accepts either a bare address or one with a port.
+func addressFamily(addr string) string {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	switch {
+	case ip == nil:
+		return "unknown"
+	case ip.To4() != nil:
+		return "IPv4"
+	default:
+		return "IPv6"
+	}
 }
 
 // PingAndJitter pings the server via accessing ping URL and calculate the average ping and jitter
@@ -160,6 +190,23 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
+	// Collect every distinct peer, not just the first. The requests usually
+	// share one connection, but a reconnect can land on a different address --
+	// a different family, even -- and reporting only the first would then
+	// describe a connection the later samples did not use.
+	var remotes []string
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			if info.Conn == nil {
+				return
+			}
+			addr := info.Conn.RemoteAddr().String()
+			if !slices.Contains(remotes, addr) {
+				remotes = append(remotes, addr)
+			}
+		},
+	}))
+
 	for i := 0; i < count; i++ {
 		start := time.Now()
 		resp, err := http.DefaultClient.Do(req)
@@ -172,6 +219,10 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 		end := time.Now()
 
 		pings = append(pings, float64(end.Sub(start).Milliseconds()))
+	}
+
+	for _, addr := range remotes {
+		output.WriteDebug("Pinging %s over TCP (%s)\n", addr, addressFamily(addr))
 	}
 
 	// discard first result due to handshake overhead
