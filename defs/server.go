@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +65,21 @@ func (s *Server) IsUp() bool {
 		return false
 	}
 	defer resp.Body.Close()
+
+	// Report what the connection actually negotiated. On hardware without AES
+	// acceleration the cipher, not the link, is what bounds the result, and
+	// under TLS 1.3 the server picks it: the client offers a set and has no say
+	// in the choice, and Go does not allow that set to be configured at all.
+	// Two runs can therefore differ several-fold for a reason the numbers alone
+	// do not show, which is what this line is for.
+	if resp.TLS != nil {
+		output.WriteDebug("Negotiated %s with %s\n",
+			tls.VersionName(resp.TLS.Version),
+			tls.CipherSuiteName(resp.TLS.CipherSuite))
+	} else {
+		output.WriteDebug("Connection is not encrypted\n")
+	}
+
 	b, err := io.ReadAll(resp.Body)
 	if err != nil || len(b) > 0 {
 		// %q rather than Sanitize: this is a raw response body where newlines are
