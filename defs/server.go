@@ -147,6 +147,18 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		output.WriteDebug("Pinging %s over ICMP (%s)\n",
 			stats.IPAddr.String(), addressFamily(stats.IPAddr.String()))
 	}
+	// A single figure hides how the samples were spread. The pinger already
+	// works these out, and the spread is what says whether a link is steady or
+	// merely fast on average. Raw counts rather than a loss percentage: ten
+	// probes are too few for a rate, and ICMP is often policed independently of
+	// the data path, so a percentage would say more about the server's ICMP
+	// handling than about the network.
+	output.WriteDebug("Ping over ICMP: min %.2f ms, avg %.2f ms, max %.2f ms, stddev %.2f ms, %d/%d replies\n",
+		float64(stats.MinRtt.Microseconds())/1000,
+		float64(stats.AvgRtt.Microseconds())/1000,
+		float64(stats.MaxRtt.Microseconds())/1000,
+		float64(stats.StdDevRtt.Microseconds())/1000,
+		stats.PacketsRecv, stats.PacketsSent)
 
 	var lastPing, jitter float64
 	for idx, rtt := range stats.Rtts {
