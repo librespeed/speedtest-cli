@@ -16,8 +16,8 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/gocarina/gocsv"
 	"github.com/librespeed/speedtest-cli/defs"
-	"github.com/librespeed/speedtest-cli/report"
 	"github.com/librespeed/speedtest-cli/output"
+	"github.com/librespeed/speedtest-cli/report"
 	"github.com/urfave/cli/v2"
 )
 
@@ -46,10 +46,10 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			return err
 		}
 
-		output.WriteUI("Selected server: %s [%s]\n", currentServer.Name, u.Hostname())
+		output.WriteUI("Selected server: %s [%s]\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
 
 		if sponsorMsg := currentServer.Sponsor(); sponsorMsg != "" {
-			output.WriteUI("Sponsored by: %s\n", sponsorMsg)
+			output.WriteUI("Sponsored by: %s\n", output.Sanitize(sponsorMsg))
 		}
 
 		if currentServer.IsUp() {
@@ -58,12 +58,12 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				output.WriteError("Failed to get IP info: %s\n", err)
 				return err
 			}
-			output.WriteUI("You're testing from: %s\n", ispInfo.ProcessedString)
+			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 			// get ping and jitter value
 			var pb *spinner.Spinner
 			if !silent {
-				pb = spinner.New(spinner.CharSets[11], 100*time.Millisecond)
+				pb = spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 				pb.Prefix = "Pinging server...  "
 				pb.Start()
 			}
@@ -78,8 +78,11 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			}
 
 			if pb != nil {
-				pb.FinalMSG = fmt.Sprintf("Ping: %.2f ms\tJitter: %.2f ms\n", p, jitter)
+				// print the result ourselves instead of via pb.FinalMSG: the
+				// spinner only prints it when it was actually running, which it
+				// isn't when stderr is not a terminal
 				pb.Stop()
+				output.WriteUI("Ping: %.2f ms\tJitter: %.2f ms\n", p, jitter)
 			}
 
 			// get download value
@@ -113,14 +116,14 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			}
 
 			// print result if --simple is given
-		if c.Bool(defs.OptionSimple) {
-			if c.Bool(defs.OptionBytes) {
-				useMebi := c.Bool(defs.OptionMebiBytes)
-				output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%s\nUpload rate:\t%s\n", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
-			} else {
-				output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps\n", p, jitter, downloadValue, uploadValue)
+			if c.Bool(defs.OptionSimple) {
+				if c.Bool(defs.OptionBytes) {
+					useMebi := c.Bool(defs.OptionMebiBytes)
+					output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%s\nUpload rate:\t%s\n", p, jitter, humanizeMbps(downloadValue, useMebi), humanizeMbps(uploadValue, useMebi))
+				} else {
+					output.WriteOut("Ping:\t%.2f ms\tJitter:\t%.2f ms\nDownload rate:\t%.2f Mbps\nUpload rate:\t%.2f Mbps\n", p, jitter, downloadValue, uploadValue)
+				}
 			}
-		}
 
 			// print share link if --share is given
 			var shareLink string
@@ -182,7 +185,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				reps_json = append(reps_json, rep)
 			}
 		} else {
-			output.WriteUI("Selected server %s (%s) is not responding at the moment, try again later\n", currentServer.Name, u.Hostname())
+			output.WriteUI("Selected server %s (%s) is not responding at the moment, try again later\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
 		}
 
 		//add a new line after each test if testing multiple servers
