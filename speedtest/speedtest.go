@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -277,7 +278,7 @@ func SpeedTest(c *cli.Context) error {
 
 		if err != nil {
 			output.WriteUI("Retry with /.well-known/librespeed\n")
-			servers, err = getServerList(forceScheme, serverUrl+"/.well-known/librespeed", c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
+			servers, err = getServerList(forceScheme, wellKnownServerURL(serverUrl), c.IntSlice(defs.OptionExclude), c.IntSlice(defs.OptionServer), !c.Bool(defs.OptionList))
 		}
 	}
 	if err != nil {
@@ -394,6 +395,19 @@ func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGro
 			wg.Done()
 		}
 	}
+}
+
+// wellKnownServerURL builds the /.well-known/librespeed URL from a server
+// list URL's origin. Appending to the full URL (e.g.
+// .../servers.php/.well-known/librespeed) would always 404; the discovery
+// endpoint lives at the site root. Falls back to appending the path when the
+// URL cannot be parsed or has no origin.
+func wellKnownServerURL(serverURL string) string {
+	u, err := url.Parse(serverURL)
+	if err == nil && u.Scheme != "" && u.Host != "" {
+		return u.Scheme + "://" + u.Host + "/.well-known/librespeed"
+	}
+	return serverURL + "/.well-known/librespeed"
 }
 
 // getServerList fetches the server JSON from a remote server
