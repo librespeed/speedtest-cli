@@ -79,6 +79,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 			// nothing at all until they finish. Report each phase under --debug
 			// instead, with the timings and counts the spinner cannot carry.
 			output.WriteDebug("Ping test starting: %d pings, ICMP: %t\n", pingCount, !noICMP)
+			output.WriteEvent(output.PhaseEvent{Event: "phase", Phase: "ping"})
 			pingStart := time.Now()
 
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
@@ -105,6 +106,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				output.WriteDebug("Download test skipped\n")
 			} else {
 				output.WriteDebug("Download test starting: %d stream(s), %d chunk(s), up to %ds\n", c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), c.Int(defs.OptionDuration))
+				output.WriteEvent(output.PhaseEvent{Event: "phase", Phase: "download"})
 				downloadStart := time.Now()
 
 				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), time.Duration(c.Int(defs.OptionDuration))*time.Second)
@@ -126,6 +128,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				output.WriteDebug("Upload test skipped\n")
 			} else {
 				output.WriteDebug("Upload test starting: %d stream(s), %d KiB per request, up to %ds\n", c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), c.Int(defs.OptionDuration))
+				output.WriteEvent(output.PhaseEvent{Event: "phase", Phase: "upload"})
 				uploadStart := time.Now()
 
 				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), time.Duration(c.Int(defs.OptionDuration))*time.Second)
@@ -187,8 +190,9 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				rep.IP = ispInfo.RawISPInfo.IP
 
 				reps_csv = append(reps_csv, rep)
-			} else if c.Bool(defs.OptionJSON) {
-				// print json if --json is given
+			} else if c.Bool(defs.OptionJSON) || c.Bool(defs.OptionJSONStream) {
+				// the stream's final result event carries the same reports
+				// --json prints, so one parser handles both formats
 				var rep report.JSONReport
 				rep.Timestamp = time.Now()
 
@@ -233,6 +237,8 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 			os.Stdout.Write(b[:])
 			os.Stdout.WriteString("\n")
 		}
+	} else if c.Bool(defs.OptionJSONStream) {
+		output.WriteEvent(output.ResultEvent{Event: "result", Reports: reps_json})
 	}
 
 	return nil

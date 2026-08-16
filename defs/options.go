@@ -19,6 +19,7 @@ const (
 	OptionCSVDelimiter    = "csv-delimiter"
 	OptionCSVHeader       = "csv-header"
 	OptionJSON            = "json"
+	OptionJSONStream      = "json-stream"
 	OptionList            = "list"
 	OptionServer          = "server"
 	OptionExclude         = "exclude"
