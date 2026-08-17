@@ -451,6 +451,18 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		uploadReq.Header.Set("User-Agent", UserAgent)
 		uploadReq.Header.Set("Accept-Encoding", "identity")
 
+		if !noPrealloc {
+			// Send Content-Length instead of Transfer-Encoding: chunked. The
+			// TeeReader around the payload hides its length, so Go would
+			// otherwise switch to chunked encoding. Hand-written HTTP servers
+			// that do not decode chunked bodies (e.g. librespeed-rs) then block
+			// waiting for an EOF that never comes while the client keeps the
+			// connection open, hanging the upload after a single payload (see
+			// librespeed/speedtest-cli#122). A fixed length is the standard,
+			// universally supported form.
+			uploadReq.ContentLength = int64(uploadSize)
+		}
+
 		resp, err := http.DefaultClient.Do(uploadReq)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
