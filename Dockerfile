@@ -11,7 +11,7 @@ COPY . .
 # Build librespeed-cli
 RUN ./build.sh
 
-FROM alpine:3.17
+FROM alpine:3.24
 
 # Copy librespeed-cli binary
 COPY --from=builder /usr/src/librespeed-cli/out/librespeed-cli* /bin/librespeed-cli
