@@ -111,6 +111,11 @@ If you have either [Scoop](https://scoop.sh/) or [Chocolatey](https://chocolatey
   > choco install librespeed-cli
   ```
 
+- WinGet:
+  ```
+  > winget install LibreSpeed.librespeed-cli 
+  ```
+
 ## Container Image
 
 You can run `librespeed-cli` in a container.
