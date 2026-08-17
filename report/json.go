@@ -36,9 +36,21 @@ type Client struct {
 // The payload may be an object, an empty string, or absent; anything that does
 // not parse as an object yields an empty Client rather than an error.
 func NewClient(raw json.RawMessage) Client {
-	var c Client
-	if len(raw) > 0 {
-		json.Unmarshal(raw, &c.IPInfoResponse)
+	var data struct {
+		defs.IPInfoResponse
+		ASName string `json:"as_name"`
 	}
+
+	if len(raw) > 0 {
+		json.Unmarshal(raw, &data)
+	}
+
+	c := Client{IPInfoResponse: data.IPInfoResponse}
+
+	// Current backends use as_name, while older ones use org.
+	if c.Organization == "" {
+		c.Organization = data.ASName
+	}
+
 	return c
 }
