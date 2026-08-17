@@ -205,6 +205,9 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 				rep.Client = report.NewClient(ispInfo.RawISPInfo)
 				rep.Client.Readme = ""
+				// IP() falls back to processedString, so the report carries an
+				// address even when the backend keeps rawIspInfo empty.
+				rep.Client.IP = ispInfo.IP()
 
 				reps_json = append(reps_json, rep)
 			}

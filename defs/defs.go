@@ -2,7 +2,9 @@ package defs
 
 import (
 	"encoding/json"
+	"net"
 	"runtime"
+	"strings"
 )
 
 var (
@@ -39,13 +41,20 @@ type IPInfoResponse struct {
 	Readme       string `json:"readme,omitempty"`
 }
 
-// IP returns the client address from the raw ISP response. The backend may
-// return rawIspInfo as an object, an empty string, or not at all; anything
-// that does not parse as an object yields an empty address.
+// IP returns the client IP address, preferring rawIspInfo and falling
+// back to the first token of processedString when it is a valid IP.
 func (g *GetIPResult) IP() string {
 	var info IPInfoResponse
 	if len(g.RawISPInfo) > 0 {
 		json.Unmarshal(g.RawISPInfo, &info)
 	}
-	return info.IP
+	if info.IP != "" {
+		return info.IP
+	}
+
+	fields := strings.Fields(g.ProcessedString)
+	if len(fields) > 0 && net.ParseIP(fields[0]) != nil {
+		return fields[0]
+	}
+	return ""
 }
