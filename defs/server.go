@@ -459,8 +459,10 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 			// waiting for an EOF that never comes while the client keeps the
 			// connection open, hanging the upload after a single payload (see
 			// librespeed/speedtest-cli#122). A fixed length is the standard,
-			// universally supported form.
-			uploadReq.ContentLength = int64(uploadSize)
+			// universally supported form. Use the payload's actual size:
+			// SetUploadSize scales the CLI's KiB option by 1024, so the request
+			// length must match the generated blob, not the option value.
+			uploadReq.ContentLength = int64(len(counter.Payload()))
 		}
 
 		resp, err := http.DefaultClient.Do(uploadReq)

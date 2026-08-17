@@ -180,30 +180,35 @@ func librespeedRSLikeServer(t *testing.T) (*Server, *atomic.Int64, *atomic.Int64
 
 // TestUploadSendsContentLength is the regression test for
 // librespeed/speedtest-cli#122: Upload must send an explicit Content-Length
-// so servers that never chunk-decode (librespeed-rs) answer instead of
-// blocking on a body that never ends. Without the fix the request goes out
-// chunked and the upload stalls after a single payload.
+// matching the generated payload so servers that never chunk-decode
+// (librespeed-rs) answer instead of blocking on a body that never ends.
+// Without the fix the request goes out chunked and the upload stalls after a
+// single payload; with a wrong length the transport errors out the same way.
 func TestUploadSendsContentLength(t *testing.T) {
 	s, contentLength, bodyBytes := librespeedRSLikeServer(t)
 
+	// Same units as the CLI: --upload-size N means N KiB. SetUploadSize
+	// scales by 1024, so the payload and the Content-Length must be 1 MiB,
+	// not 1024.
 	const (
-		uploadSize = 1024 * 1024
-		duration   = 500 * time.Millisecond
-		requests   = 2
+		uploadSizeKiB = 1024
+		payloadBytes  = uploadSizeKiB * 1024
+		duration      = 500 * time.Millisecond
+		requests      = 2
 	)
 
-	_, total, err := s.Upload(false, true, false, false, requests, uploadSize, duration)
+	_, total, err := s.Upload(false, true, false, false, requests, uploadSizeKiB, duration)
 	if err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
 
-	if got := contentLength.Load(); got != uploadSize {
-		t.Errorf("server saw Content-Length %d, want %d (chunked encoding would stall it)", got, int64(uploadSize))
+	if got := contentLength.Load(); got != payloadBytes {
+		t.Errorf("server saw Content-Length %d, want %d (chunked encoding or a wrong length stalls the upload)", got, int64(payloadBytes))
 	}
-	if got := bodyBytes.Load(); got <= uploadSize {
-		t.Errorf("server consumed %d bytes, want more than one %d-byte payload (upload stalled)", got, int64(uploadSize))
+	if got := bodyBytes.Load(); got <= payloadBytes {
+		t.Errorf("server consumed %d bytes, want more than one %d-byte payload (upload stalled)", got, int64(payloadBytes))
 	}
-	if total <= uploadSize {
+	if total <= payloadBytes {
 		t.Errorf("counter reported %d bytes, want more than one payload", total)
 	}
 }
