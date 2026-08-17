@@ -222,6 +222,6 @@ func main() {
 	// run main function with cli options
 	err := app.Run(os.Args)
 	if err != nil {
-		output.Fatal("Terminated due to error")
+		output.Fatalf("Terminated due to error: %s", err)
 	}
 }
