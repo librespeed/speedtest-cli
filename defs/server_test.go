@@ -1,10 +1,17 @@
 package defs
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // getIPHandler serves a canned getIP.php response and records the parsed result.
@@ -77,5 +84,126 @@ func TestGetIPInfoAbsentRawIspInfo(t *testing.T) {
 	}
 	if got.IP() != "" {
 		t.Errorf("IP() = %q, want empty", got.IP())
+	}
+}
+
+// --- Upload against a server with librespeed-rs body semantics ---
+
+// librespeedRSLikeServer mimics the hand-written HTTP body handling of
+// librespeed/speedtest-rust: a Content-Length body is read exactly and
+// answered; a chunked body is read as a raw stream in fixed 1024-byte blocks
+// and never chunk-decoded. With a finite payload the chunked path blocks once
+// the data runs out while the client keeps the connection open — the stall
+// behind librespeed/speedtest-cli#122. It records the Content-Length header
+// and total body bytes of every request it answers.
+func librespeedRSLikeServer(t *testing.T) (*Server, *atomic.Int64, *atomic.Int64) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	var contentLength atomic.Int64
+	var bodyBytes atomic.Int64
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				for {
+					status, err := br.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if !strings.HasPrefix(strings.ToLower(status), "post ") {
+						return
+					}
+					cl := int64(0)
+					chunked := false
+					for {
+						line, err := br.ReadString('\n')
+						if err != nil {
+							return
+						}
+						line = strings.TrimRight(line, "\r\n")
+						if line == "" {
+							break
+						}
+						k, v, _ := strings.Cut(line, ":")
+						switch strings.ToLower(strings.TrimSpace(k)) {
+						case "content-length":
+							cl, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+						case "transfer-encoding":
+							chunked = strings.EqualFold(strings.TrimSpace(v), "chunked")
+						}
+					}
+					contentLength.Store(cl)
+					switch {
+					case cl > 0:
+						// Fixed: read exactly cl bytes, then answer.
+						n, err := io.CopyN(io.Discard, br, cl)
+						if err != nil {
+							return
+						}
+						bodyBytes.Add(n)
+					case chunked:
+						// Chunked: read the raw stream in fixed blocks, never
+						// chunk-decoded (librespeed-rs behaviour). With a
+						// finite payload this blocks until the peer goes away.
+						buf := make([]byte, 1024)
+						for {
+							if _, err := io.ReadFull(br, buf); err != nil {
+								break
+							}
+							bodyBytes.Add(1024)
+						}
+						return
+					default:
+						return
+					}
+					if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")); err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	return &Server{Server: "http://" + ln.Addr().String(), UploadURL: "/"}, &contentLength, &bodyBytes
+}
+
+// TestUploadSendsContentLength is the regression test for
+// librespeed/speedtest-cli#122: Upload must send an explicit Content-Length
+// so servers that never chunk-decode (librespeed-rs) answer instead of
+// blocking on a body that never ends. Without the fix the request goes out
+// chunked and the upload stalls after a single payload.
+func TestUploadSendsContentLength(t *testing.T) {
+	s, contentLength, bodyBytes := librespeedRSLikeServer(t)
+
+	const (
+		uploadSize = 1024 * 1024
+		duration   = 500 * time.Millisecond
+		requests   = 2
+	)
+
+	_, total, err := s.Upload(false, true, false, false, requests, uploadSize, duration)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+
+	if got := contentLength.Load(); got != uploadSize {
+		t.Errorf("server saw Content-Length %d, want %d (chunked encoding would stall it)", got, int64(uploadSize))
+	}
+	if got := bodyBytes.Load(); got <= uploadSize {
+		t.Errorf("server consumed %d bytes, want more than one %d-byte payload (upload stalled)", got, int64(uploadSize))
+	}
+	if total <= uploadSize {
+		t.Errorf("counter reported %d bytes, want more than one payload", total)
 	}
 }
