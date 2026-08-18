@@ -52,10 +52,22 @@ type PingResult struct {
 func SpeedTest(c *cli.Context) error {
 	// check for suppressed output flags
 	var silent bool
-	if c.Bool(defs.OptionSimple) || c.Bool(defs.OptionJSON) || c.Bool(defs.OptionCSV) {
+	if c.Bool(defs.OptionSimple) || c.Bool(defs.OptionJSON) || c.Bool(defs.OptionCSV) || c.Bool(defs.OptionJSONStream) {
 		output.SetQuiet(true)
 		silent = true
 	}
+
+	// mixing a JSON document into a line stream would leave neither format
+	// parseable on its own, so the stream conflicts with --json and --csv
+	// rather than combining with them
+	if c.Bool(defs.OptionJSONStream) && (c.Bool(defs.OptionJSON) || c.Bool(defs.OptionCSV)) {
+		other := defs.OptionCSV
+		if c.Bool(defs.OptionJSON) {
+			other = defs.OptionJSON
+		}
+		return fmt.Errorf("incompatible options '%s' and '%s'", defs.OptionJSONStream, other)
+	}
+	output.SetStream(c.Bool(defs.OptionJSONStream))
 
 	// check for debug flag
 	if c.Bool(defs.OptionDebug) {

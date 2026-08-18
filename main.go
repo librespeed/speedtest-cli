@@ -98,6 +98,15 @@ func main() {
 					"\taffected by --bytes",
 			},
 			&cli.BoolFlag{
+				Name: defs.OptionJSONStream,
+				Usage: "Suppress verbose output, emit newline-delimited JSON\n" +
+					"\tevents on stdout while the test runs: a phase event\n" +
+					"\tas each stage starts, a progress event a second with\n" +
+					"\tthe rate so far, and a final result event with the\n" +
+					"\tsame reports --json prints. Speeds listed in Mbps\n" +
+					"\tand not affected by --bytes",
+			},
+			&cli.BoolFlag{
 				Name:  defs.OptionList,
 				Usage: "Display a list of LibreSpeed.org servers",
 			},

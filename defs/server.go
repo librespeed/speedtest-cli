@@ -284,6 +284,46 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 }
 
 // Download performs the actual download test
+// streamProgress emits one progress event a second while a transfer phase
+// runs, reading the rate off the phase's byte counter. The returned stop
+// function ends the ticker and does not return until the goroutine is done,
+// so a late progress event can never land after the next phase event.
+func streamProgress(phase string, counter *BytesCounter, duration time.Duration) func() {
+	if !output.StreamEnabled() {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	start := time.Now()
+
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				elapsed := time.Since(start).Seconds()
+				output.WriteEvent(output.ProgressEvent{
+					Event:    "progress",
+					Phase:    phase,
+					Seconds:  math.Round(elapsed*10) / 10,
+					Mbps:     math.Round(counter.AvgMbps()*100) / 100,
+					Progress: int(math.Min(elapsed/duration.Seconds()*100, 100)),
+				})
+			}
+		}
+	}()
+
+	return func() {
+		close(done)
+		<-stopped
+	}
+}
+
 func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chunks int, duration time.Duration) (float64, uint64, error) {
 	t := time.Now()
 	defer func() {
@@ -351,6 +391,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	}
 
 	counter.Start()
+	defer streamProgress("download", counter, duration)()
 	if !silent {
 		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Downloading...  "
@@ -495,6 +536,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	}
 
 	counter.Start()
+	defer streamProgress("upload", counter, duration)()
 	if !silent {
 		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Uploading...  "
