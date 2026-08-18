@@ -52,8 +52,9 @@ func TestGetIPInfoKeepsEmptyRawIspInfo(t *testing.T) {
 	if got.ProcessedString != "10.0.0.70" {
 		t.Errorf("ProcessedString = %q, want %q", got.ProcessedString, "10.0.0.70")
 	}
-	if got.IP() != "" {
-		t.Errorf("IP() = %q, want empty", got.IP())
+	// With rawIspInfo empty the address is recovered from processedString.
+	if got.IP() != "10.0.0.70" {
+		t.Errorf("IP() = %q, want %q", got.IP(), "10.0.0.70")
 	}
 
 	b, err := json.Marshal(got)
@@ -82,8 +83,9 @@ func TestGetIPInfoAbsentRawIspInfo(t *testing.T) {
 	if got.ProcessedString != "1.2.3.4" {
 		t.Errorf("ProcessedString = %q, want %q", got.ProcessedString, "1.2.3.4")
 	}
-	if got.IP() != "" {
-		t.Errorf("IP() = %q, want empty", got.IP())
+	// Recovered from processedString when rawIspInfo is absent entirely.
+	if got.IP() != "1.2.3.4" {
+		t.Errorf("IP() = %q, want %q", got.IP(), "1.2.3.4")
 	}
 }
 
