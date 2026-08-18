@@ -391,7 +391,6 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	}
 
 	counter.Start()
-	defer streamProgress("download", counter, duration)()
 	if !silent {
 		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Downloading...  "
@@ -421,6 +420,11 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		spawnDownload()
 		time.Sleep(200 * time.Millisecond)
 	}
+
+	// One clock for the whole test window: the ticker and the timeout both
+	// start here, after ramp-up, so reported progress cannot run ahead of the
+	// test it describes.
+	defer streamProgress("download", counter, duration)()
 	timeout := time.After(duration)
 Loop:
 	for {
@@ -536,7 +540,6 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	}
 
 	counter.Start()
-	defer streamProgress("upload", counter, duration)()
 	if !silent {
 		pb := spinner.New(spinner.CharSets[11], 100*time.Millisecond, spinner.WithWriterFile(os.Stderr))
 		pb.Prefix = "Uploading...  "
@@ -566,6 +569,11 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		spawnUpload()
 		time.Sleep(200 * time.Millisecond)
 	}
+
+	// One clock for the whole test window: the ticker and the timeout both
+	// start here, after ramp-up, so reported progress cannot run ahead of the
+	// test it describes.
+	defer streamProgress("upload", counter, duration)()
 	timeout := time.After(duration)
 Loop:
 	for {
