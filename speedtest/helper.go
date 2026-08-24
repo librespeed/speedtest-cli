@@ -207,6 +207,13 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
+				if currentServer.NegotiatedTLS != nil {
+					rep.TLS = &report.TLSReport{
+						Version: currentServer.NegotiatedTLS.Version,
+						Cipher:  currentServer.NegotiatedTLS.Cipher,
+					}
+				}
+
 				rep.Client = report.NewClient(ispInfo.RawISPInfo)
 				rep.Client.Readme = ""
 				// IP() falls back to processedString, so the report carries an

@@ -40,6 +40,16 @@ type Server struct {
 
 	NoICMP bool         `json:"-"`
 	TLog   TelemetryLog `json:"-"`
+
+	// What the connection to this server actually negotiated; nil over
+	// plain HTTP. Filled by IsUp, which runs before every measurement.
+	NegotiatedTLS *TLSInfo `json:"-"`
+}
+
+// TLSInfo names the negotiated TLS parameters of a connection.
+type TLSInfo struct {
+	Version string
+	Cipher  string
 }
 
 // IsUp checks the speed test backend is up by accessing the ping URL
@@ -73,9 +83,15 @@ func (s *Server) IsUp() bool {
 	// Two runs can therefore differ several-fold for a reason the numbers alone
 	// do not show, which is what this line is for.
 	if resp.TLS != nil {
+		// Kept for the report as well as logged: the cipher explains the
+		// number next to it, and a debug line is gone when the history
+		// entry it would explain is read.
+		s.NegotiatedTLS = &TLSInfo{
+			Version: tls.VersionName(resp.TLS.Version),
+			Cipher:  tls.CipherSuiteName(resp.TLS.CipherSuite),
+		}
 		output.WriteDebug("Negotiated %s with %s\n",
-			tls.VersionName(resp.TLS.Version),
-			tls.CipherSuiteName(resp.TLS.CipherSuite))
+			s.NegotiatedTLS.Version, s.NegotiatedTLS.Cipher)
 	} else {
 		output.WriteDebug("Connection is not encrypted\n")
 	}

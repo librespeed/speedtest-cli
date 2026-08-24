@@ -19,6 +19,19 @@ type JSONReport struct {
 	Upload        float64   `json:"upload"`
 	Download      float64   `json:"download"`
 	Share         string    `json:"share"`
+
+	// TLS is what the connection to the server negotiated, absent over
+	// plain HTTP. On hardware without AES acceleration the cipher, not
+	// the link, can bound the result, and under TLS 1.3 the server picks
+	// it -- so two otherwise identical runs can differ several-fold for a
+	// reason the numbers alone do not show.
+	TLS *TLSReport `json:"tls,omitempty"`
+}
+
+// TLSReport names the negotiated TLS parameters a measurement ran over.
+type TLSReport struct {
+	Version string `json:"version"`
+	Cipher  string `json:"cipher"`
 }
 
 // Server represents the speed test server's information
