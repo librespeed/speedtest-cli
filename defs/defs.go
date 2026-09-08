@@ -3,7 +3,6 @@ package defs
 import (
 	"encoding/json"
 	"net"
-	"runtime"
 	"strings"
 )
 
@@ -12,13 +11,8 @@ var (
 	BuildDate   string
 	ProgName    string
 	ProgVersion string
-	// UserAgent names the platform as well as the program, the way a browser
-	// does. A server's telemetry already stores this header, so reporting the
-	// operating system and architecture here is what lets an operator tell
-	// which kinds of machine are measuring against them without any change to
-	// what the client sends. It stays coarse deliberately: the kernel version
-	// or the hostname would identify the machine rather than describe it.
-	UserAgent = ProgName + "/" + ProgVersion + " (" + runtime.GOOS + "; " + runtime.GOARCH + ")"
+	// UserAgent names the platform as well as the program; see buildUserAgent.
+	UserAgent = buildUserAgent()
 )
 
 // GetIPResults represents the returned JSON from backend server's getIP.php endpoint
