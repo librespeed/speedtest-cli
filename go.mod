@@ -1,13 +1,13 @@
 module github.com/librespeed/speedtest-cli
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/prometheus-community/pro-bing v0.9.1
 	github.com/urfave/cli/v2 v2.27.7
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 )
 
 require (
