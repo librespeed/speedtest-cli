@@ -42,7 +42,8 @@ type Server struct {
 	TLog   TelemetryLog `json:"-"`
 
 	// What the connection to this server actually negotiated; nil over
-	// plain HTTP. Filled by IsUp, which runs before every measurement.
+	// plain HTTP. Filled by CheckUp (and IsUp, which wraps it), which runs
+	// before every measurement.
 	NegotiatedTLS *TLSInfo `json:"-"`
 }
 
@@ -54,25 +55,36 @@ type TLSInfo struct {
 
 // IsUp checks the speed test backend is up by accessing the ping URL
 func (s *Server) IsUp() bool {
+	return s.CheckUp() == nil
+}
+
+// CheckUp checks the speed test backend is up by accessing the ping URL,
+// which must answer 200 with an empty body. It returns nil when the backend
+// is up and otherwise why it is not: the refused connection, the unreachable
+// network, the timeout, the wrong status or a body where none belongs.
+func (s *Server) CheckUp() error {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Check backend is up took %s", time.Since(t).String())
 	}()
 
-	u, _ := s.GetURL()
+	u, err := s.GetURL()
+	if err != nil {
+		return err
+	}
 	u.Path = path.Join(u.Path, s.PingURL)
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		output.WriteDebug("Failed when creating HTTP request: %s\n", err)
-		return false
+		return err
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		output.WriteDebug("Error checking for server status: %s\n", err)
-		return false
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -101,10 +113,24 @@ func (s *Server) IsUp() bool {
 		// %q rather than Sanitize: this is a raw response body where newlines are
 		// legitimate, and quoting escapes control chars without losing them
 		output.WriteDebug("Failed when parsing get IP result: %q\n", b)
-		return false
 	}
-	// only return online if the ping URL returns nothing and 200
-	return resp.StatusCode == http.StatusOK
+	// only return online if the ping URL returns nothing and 200. The status
+	// goes first: a web server's 404 or 500 comes with an error page, and the
+	// status names the fault where "a non-empty body" would not.
+	switch {
+	case resp.StatusCode != http.StatusOK:
+		// StatusText rather than resp.Status: the reason phrase in the status
+		// line is whatever the server chose to send.
+		if text := http.StatusText(resp.StatusCode); text != "" {
+			return fmt.Errorf("the ping request returned HTTP %d %s", resp.StatusCode, text)
+		}
+		return fmt.Errorf("the ping request returned HTTP %d", resp.StatusCode)
+	case err != nil:
+		return fmt.Errorf("reading the ping response: %w", err)
+	case len(b) > 0:
+		return errors.New("the ping request returned a non-empty body")
+	}
+	return nil
 }
 
 // rttMillis converts a round-trip time to milliseconds without discarding the
@@ -651,7 +677,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	if len(b) > 0 {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			output.WriteDebug("Failed when parsing get IP result: %s\n", err)
-			// %q rather than Sanitize: see IsUp
+			// %q rather than Sanitize: see CheckUp
 			output.WriteDebug("Received payload: %q\n", b)
 			// A server may return rawIspInfo as an empty string rather than an
 			// object (or wrap the whole payload in processedString); recover
