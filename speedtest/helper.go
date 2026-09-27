@@ -241,10 +241,8 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 	}
 
-	// Nothing was measured because no server answered: a failed run, not an
-	// empty report. In quiet mode the one line saying why is suppressed, so an
-	// empty report with exit status 0 looks like a successful run to a script
-	// on a link that cannot reach the server.
+	// No server answered: fail instead of printing an empty report, which
+	// with exit status 0 would pass for a result.
 	if !measured && len(down) > 0 {
 		return noneResponding(down)
 	}
@@ -277,10 +275,8 @@ type downServer struct {
 	reason string
 }
 
-// noneResponding says why a run whose servers were all down failed: every one
-// of them and its cause, on the one line a wrapping script shows.
-// The message is a sentence for the user, printed after "Terminated due to
-// error: " and worded like the Rust client's, hence the capital letter.
+// noneResponding names every selected server with its cause. It is printed
+// after "Terminated due to error: ", hence the capital letter.
 func noneResponding(down []downServer) error {
 	if len(down) == 1 {
 		return fmt.Errorf("Selected server %s is not responding: %s", down[0].server, down[0].reason)

@@ -53,15 +53,17 @@ type TLSInfo struct {
 	Cipher  string
 }
 
+// maxProbeBody is how much of the ping response CheckUp reads.
+const maxProbeBody = 512
+
 // IsUp checks the speed test backend is up by accessing the ping URL
 func (s *Server) IsUp() bool {
 	return s.CheckUp() == nil
 }
 
 // CheckUp checks the speed test backend is up by accessing the ping URL,
-// which must answer 200 with an empty body. It returns nil when the backend
-// is up and otherwise why it is not: the refused connection, the unreachable
-// network, the timeout, the wrong status or a body where none belongs.
+// which must answer 200 with an empty body, and returns why it is not up.
+// Like IsUp, it records the negotiated TLS in s.NegotiatedTLS.
 func (s *Server) CheckUp() error {
 	t := time.Now()
 	defer func() {
@@ -108,19 +110,19 @@ func (s *Server) CheckUp() error {
 		output.WriteDebug("Connection is not encrypted\n")
 	}
 
-	b, err := io.ReadAll(resp.Body)
+	// Any body at all means the backend is down, so the start of it is
+	// enough to decide and to show in the debug line.
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
 	if err != nil || len(b) > 0 {
 		// %q rather than Sanitize: this is a raw response body where newlines are
 		// legitimate, and quoting escapes control chars without losing them
 		output.WriteDebug("Failed when parsing get IP result: %q\n", b)
 	}
-	// only return online if the ping URL returns nothing and 200. The status
-	// goes first: a web server's 404 or 500 comes with an error page, and the
-	// status names the fault where "a non-empty body" would not.
+	// only return online if the ping URL returns nothing and 200; the status
+	// first, since a 404 or 500 usually comes with an error page
 	switch {
 	case resp.StatusCode != http.StatusOK:
-		// StatusText rather than resp.Status: the reason phrase in the status
-		// line is whatever the server chose to send.
+		// StatusText: the reason phrase is whatever the server sent
 		if text := http.StatusText(resp.StatusCode); text != "" {
 			return fmt.Errorf("the ping request returned HTTP %d %s", resp.StatusCode, text)
 		}

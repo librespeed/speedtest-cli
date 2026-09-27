@@ -29,15 +29,25 @@ func TestMain(m *testing.M) {
 }
 
 type cliResult struct {
-	code   int
-	stdout string
-	stderr string
+	code    int
+	stdout  string
+	stderr  string
+	elapsed time.Duration
 }
 
-// lastStderrLine is where a wrapping script looks for the reason a run failed.
-func (r cliResult) lastStderrLine() string {
-	lines := strings.Split(strings.TrimRight(r.stderr, "\n"), "\n")
-	return lines[len(lines)-1]
+// failure is the error the CLI terminated with, from the line main prints
+// for it. The test fails when there is no such line.
+func (r cliResult) failure(t *testing.T) string {
+	t.Helper()
+
+	const prefix = "Terminated due to error: "
+	for _, line := range strings.Split(r.stderr, "\n") {
+		if msg, ok := strings.CutPrefix(line, prefix); ok {
+			return msg
+		}
+	}
+	t.Fatalf("stderr has no %q line:\n%s", prefix, r.stderr)
+	return ""
 }
 
 func runCLI(t *testing.T, args ...string) cliResult {
@@ -52,14 +62,16 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	start := time.Now()
 	err := cmd.Run()
+	elapsed := time.Since(start)
 	code := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		code = exitErr.ExitCode()
 	} else if err != nil {
 		t.Fatalf("running the CLI: %v", err)
 	}
-	return cliResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	return cliResult{code: code, stdout: stdout.String(), stderr: stderr.String(), elapsed: elapsed}
 }
 
 // mockBackend answers like a speed test backend, with ping URLs that answer
@@ -150,7 +162,7 @@ func writeServerList(t *testing.T, servers ...listedServer) string {
 // on stderr, and no report on stdout -- not a null a script would take for a
 // result.
 func TestDownServerFailsTheRunInEveryMode(t *testing.T) {
-	const down = "Terminated due to error: Selected server Dead (127.0.0.1) is not responding: "
+	const down = "Selected server Dead (127.0.0.1) is not responding: "
 	list := writeServerList(t, listedServer{1, "Dead", deadURL(t), "empty.php"})
 
 	for _, mode := range []string{"", "--json", "--json-stream", "--csv", "--simple"} {
@@ -167,10 +179,9 @@ func TestDownServerFailsTheRunInEveryMode(t *testing.T) {
 			if r.stdout != "" {
 				t.Errorf("stdout = %q, want no report", r.stdout)
 			}
-			cause, ok := strings.CutPrefix(r.lastStderrLine(), down)
-			// the wording of the refusal is the operating system's
-			if !ok || !strings.Contains(cause, "dial tcp 127.0.0.1:") {
-				t.Errorf("last stderr line = %q, want %q and the failed connection", r.lastStderrLine(), down)
+			// the cause's wording is Go's and the OS's; defs checks its type
+			if msg := r.failure(t); !strings.HasPrefix(msg, down) || len(msg) == len(down) {
+				t.Errorf("error = %q, want %q and a cause", msg, down)
 			}
 			if mode == "" && !strings.Contains(r.stderr, "\nSelected server Dead (127.0.0.1) is not responding at the moment, try again later\n") {
 				t.Errorf("the usual line is missing from stderr:\n%s", r.stderr)
@@ -201,15 +212,16 @@ func TestServerAnsweringItsProbeWronglyFailsTheRun(t *testing.T) {
 			if r.stdout != "" {
 				t.Errorf("stdout = %q, want no report", r.stdout)
 			}
-			want := "Terminated due to error: Selected server Wrong (127.0.0.1) is not responding: the ping request returned " + c.answered
-			if got := r.lastStderrLine(); got != want {
-				t.Errorf("last stderr line = %q, want %q", got, want)
+			want := "Selected server Wrong (127.0.0.1) is not responding: the ping request returned " + c.answered
+			if got := r.failure(t); got != want {
+				t.Errorf("error = %q, want %q", got, want)
 			}
 		})
 	}
 }
 
-// A backend that does not answer within --timeout fails the run because of it.
+// A backend that does not answer within --timeout fails the run when the
+// timeout runs out, not the default 15 seconds.
 func TestHangingServerFailsTheRunWithTheTimeout(t *testing.T) {
 	backend := mockBackend(t)
 	list := writeServerList(t, listedServer{1, "Hang", backend.URL, "hang.php"})
@@ -222,15 +234,17 @@ func TestHangingServerFailsTheRunWithTheTimeout(t *testing.T) {
 	if r.stdout != "" {
 		t.Errorf("stdout = %q, want no report", r.stdout)
 	}
-	const down = "Terminated due to error: Selected server Hang (127.0.0.1) is not responding: "
-	if cause, ok := strings.CutPrefix(r.lastStderrLine(), down); !ok || !strings.Contains(cause, "Client.Timeout exceeded") {
-		t.Errorf("last stderr line = %q, want %q and the timeout", r.lastStderrLine(), down)
+	const down = "Selected server Hang (127.0.0.1) is not responding: "
+	if msg := r.failure(t); !strings.HasPrefix(msg, down) || len(msg) == len(down) {
+		t.Errorf("error = %q, want %q and a cause", msg, down)
+	}
+	if r.elapsed >= 10*time.Second {
+		t.Errorf("the run took %s, want about the 1 second --timeout", r.elapsed)
 	}
 }
 
 // With more than one server and none of them answering, the error names every
-// one with its own cause on the one line a wrapping script shows, not only the
-// last server tried.
+// one with its own cause, not only the last server tried.
 func TestRunWhoseServersAreAllDownNamesEach(t *testing.T) {
 	backend := mockBackend(t)
 	list := writeServerList(t,
@@ -246,14 +260,14 @@ func TestRunWhoseServersAreAllDownNamesEach(t *testing.T) {
 	if r.stdout != "" {
 		t.Errorf("stdout = %q, want no report", r.stdout)
 	}
-	last := r.lastStderrLine()
-	causes, ok := strings.CutPrefix(last, "Terminated due to error: None of the 2 selected servers is responding: ")
+	msg := r.failure(t)
+	causes, ok := strings.CutPrefix(msg, "None of the 2 selected servers is responding: ")
 	dead, wrong, split := strings.Cut(causes, "; ")
 	if !ok || !split {
-		t.Fatalf("last stderr line = %q, want both servers named", last)
+		t.Fatalf("error = %q, want both servers named", msg)
 	}
-	if !strings.HasPrefix(dead, "Dead (127.0.0.1): ") || !strings.Contains(dead, "dial tcp 127.0.0.1:") {
-		t.Errorf("first cause = %q, want Dead and its failed connection", dead)
+	if !strings.HasPrefix(dead, "Dead (127.0.0.1): ") || len(dead) == len("Dead (127.0.0.1): ") {
+		t.Errorf("first cause = %q, want Dead and a cause", dead)
 	}
 	if want := "Wrong (127.0.0.1): the ping request returned HTTP 404 Not Found"; wrong != want {
 		t.Errorf("second cause = %q, want %q", wrong, want)
@@ -288,6 +302,28 @@ func TestDownServerAmongOthersLeavesTheRunToTheOnesThatAnswer(t *testing.T) {
 	}
 }
 
+// Without --server the fastest server is picked and a down one is skipped,
+// as before: with every server down the run fails before any test.
+func TestAutomaticSelectionWithEveryServerDownFailsAsBefore(t *testing.T) {
+	backend := mockBackend(t)
+	list := writeServerList(t,
+		listedServer{1, "Dead", deadURL(t), "empty.php"},
+		listedServer{2, "Wrong", backend.URL, "error-page.php"},
+	)
+
+	r := runCLI(t, "--local-json", list, "--no-icmp", "--json")
+
+	if r.code != 1 {
+		t.Errorf("exit status %d, want 1; stderr:\n%s", r.code, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want no report", r.stdout)
+	}
+	if !strings.Contains(r.stderr, "No server is currently available, please try again later.\n") {
+		t.Errorf("stderr does not say no server is available:\n%s", r.stderr)
+	}
+}
+
 // A run with no server to test is not a run whose servers are down: it still
 // prints the empty report and succeeds.
 func TestRunWithNoServerToTestStillPrintsAnEmptyReport(t *testing.T) {
@@ -310,7 +346,8 @@ func TestUnreachableServerListStillFailsTheRun(t *testing.T) {
 	if r.stdout != "" {
 		t.Errorf("stdout = %q, want nothing", r.stdout)
 	}
-	if !strings.Contains(r.stderr, "Error when fetching server list: ") || !strings.HasPrefix(r.lastStderrLine(), "Terminated due to error: ") {
+	r.failure(t)
+	if !strings.Contains(r.stderr, "Error when fetching server list: ") {
 		t.Errorf("stderr does not say the list could not be fetched:\n%s", r.stderr)
 	}
 }

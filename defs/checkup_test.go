@@ -1,12 +1,13 @@
 package defs
 
 import (
+	"bytes"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // A backend that answers its probe, but not as a backend should, is down and
@@ -81,26 +82,28 @@ func TestCheckUpKeepsWhyTheConnectionFailed(t *testing.T) {
 	}
 }
 
-// A backend that does not answer within the timeout is down because of it.
-func TestCheckUpReportsATimeout(t *testing.T) {
-	release := make(chan struct{})
+// A probe that answers with a huge body is down, and CheckUp stops reading
+// it instead of taking in everything the server sends.
+func TestCheckUpStopsReadingAHugeBody(t *testing.T) {
+	const huge = 64 << 20
+	var sentAll atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-release:
+		chunk := bytes.Repeat([]byte("x"), 32<<10)
+		for sent := 0; sent < huge; sent += len(chunk) {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
 		}
+		sentAll.Store(true)
 	}))
-	defer srv.Close()
-	defer close(release)
 
-	orig := http.DefaultClient
-	http.DefaultClient = &http.Client{Timeout: 200 * time.Millisecond}
-	defer func() { http.DefaultClient = orig }()
-
-	s := Server{Name: "hang", Server: srv.URL, PingURL: "/hang.php"}
+	s := Server{Name: "huge", Server: srv.URL, PingURL: "huge.php"}
 	err := s.CheckUp()
-	var netErr net.Error
-	if !errors.As(err, &netErr) || !netErr.Timeout() {
-		t.Fatalf("CheckUp() = %v, want a timeout", err)
+	srv.Close() // waits for the handler
+	if err == nil || err.Error() != "the ping request returned a non-empty body" {
+		t.Fatalf("CheckUp() = %v, want the non-empty body", err)
+	}
+	if sentAll.Load() {
+		t.Errorf("CheckUp() read all %d bytes of the body", huge)
 	}
 }
