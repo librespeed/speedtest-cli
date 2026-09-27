@@ -42,7 +42,8 @@ type Server struct {
 	TLog   TelemetryLog `json:"-"`
 
 	// What the connection to this server actually negotiated; nil over
-	// plain HTTP. Filled by IsUp, which runs before every measurement.
+	// plain HTTP. Filled by CheckUp (and IsUp, which wraps it), which runs
+	// before every measurement.
 	NegotiatedTLS *TLSInfo `json:"-"`
 }
 
@@ -52,27 +53,40 @@ type TLSInfo struct {
 	Cipher  string
 }
 
+// maxProbeBody is how much of the ping response CheckUp reads.
+const maxProbeBody = 512
+
 // IsUp checks the speed test backend is up by accessing the ping URL
 func (s *Server) IsUp() bool {
+	return s.CheckUp() == nil
+}
+
+// CheckUp checks the speed test backend is up by accessing the ping URL,
+// which must answer 200 with an empty body, and returns why it is not up.
+// Like IsUp, it records the negotiated TLS in s.NegotiatedTLS.
+func (s *Server) CheckUp() error {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Check backend is up took %s", time.Since(t).String())
 	}()
 
-	u, _ := s.GetURL()
+	u, err := s.GetURL()
+	if err != nil {
+		return err
+	}
 	u.Path = path.Join(u.Path, s.PingURL)
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		output.WriteDebug("Failed when creating HTTP request: %s\n", err)
-		return false
+		return err
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		output.WriteDebug("Error checking for server status: %s\n", err)
-		return false
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -96,15 +110,29 @@ func (s *Server) IsUp() bool {
 		output.WriteDebug("Connection is not encrypted\n")
 	}
 
-	b, err := io.ReadAll(resp.Body)
+	// Any body at all means the backend is down, so the start of it is
+	// enough to decide and to show in the debug line.
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
 	if err != nil || len(b) > 0 {
 		// %q rather than Sanitize: this is a raw response body where newlines are
 		// legitimate, and quoting escapes control chars without losing them
 		output.WriteDebug("Failed when parsing get IP result: %q\n", b)
-		return false
 	}
-	// only return online if the ping URL returns nothing and 200
-	return resp.StatusCode == http.StatusOK
+	// only return online if the ping URL returns nothing and 200; the status
+	// first, since a 404 or 500 usually comes with an error page
+	switch {
+	case resp.StatusCode != http.StatusOK:
+		// Go's phrase for the code; over HTTP/1.x resp.Status has the server's own
+		if text := http.StatusText(resp.StatusCode); text != "" {
+			return fmt.Errorf("the ping request returned HTTP %d %s", resp.StatusCode, text)
+		}
+		return fmt.Errorf("the ping request returned HTTP %d", resp.StatusCode)
+	case err != nil:
+		return fmt.Errorf("reading the ping response: %w", err)
+	case len(b) > 0:
+		return errors.New("the ping request returned a non-empty body")
+	}
+	return nil
 }
 
 // rttMillis converts a round-trip time to milliseconds without discarding the
@@ -651,7 +679,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 	if len(b) > 0 {
 		if err := json.Unmarshal(b, &ipInfo); err != nil {
 			output.WriteDebug("Failed when parsing get IP result: %s\n", err)
-			// %q rather than Sanitize: see IsUp
+			// %q rather than Sanitize: see CheckUp
 			output.WriteDebug("Received payload: %q\n", b)
 			// A server may return rawIspInfo as an empty string rather than an
 			// object (or wrap the whole payload in processedString); recover
