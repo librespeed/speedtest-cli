@@ -54,6 +54,7 @@ output.WriteDebug("Testing against %s (%s)\n", output.Sanitize(currentServer.Nam
 		}
 
 		if currentServer.IsUp() {
+			output.WriteUI("Protocol: %s\n", currentServer.Protocol)
 			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
@@ -207,6 +208,7 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
+				rep.Protocol = currentServer.Protocol
 				if currentServer.NegotiatedTLS != nil {
 					rep.TLS = &report.TLSReport{
 						Version: currentServer.NegotiatedTLS.Version,

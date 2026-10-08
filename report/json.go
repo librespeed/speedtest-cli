@@ -26,6 +26,8 @@ type JSONReport struct {
 	// it -- so two otherwise identical runs can differ several-fold for a
 	// reason the numbers alone do not show.
 	TLS *TLSReport `json:"tls,omitempty"`
+
+	Protocol string `json:"protocol,omitempty"` // HTTP/1.1, HTTP/2.0 or HTTP/3.0
 }
 
 // TLSReport names the negotiated TLS parameters a measurement ran over.

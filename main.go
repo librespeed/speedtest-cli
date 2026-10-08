@@ -225,6 +225,12 @@ func main() {
 				Usage: "firewall mark to set on socket.",
 				Value: 0,
 			},
+			&cli.StringFlag{
+				Name: defs.OptionHTTPVersion,
+				Usage: "HTTP `VERSION` for test servers: 1.1, 2, 3, or auto to\n" +
+					"\tswitch to HTTP/3 when advertised and fall back if it fails",
+				Value: "auto",
+			},
 		},
 	}
 
