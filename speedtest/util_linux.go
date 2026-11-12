@@ -1,6 +1,7 @@
 package speedtest
 
 import (
+	"context"
 	"net"
 	"syscall"
 	"time"
@@ -34,5 +35,22 @@ func newDialerInterfaceOrFwmarkBound(iface string, fwmark int) (dialer *net.Dial
 		KeepAlive: 30 * time.Second,
 		Control:   control,
 	}
+
+	// Resolve hostnames through a socket that carries the same binding.
+	// Otherwise the resolver sends its DNS queries over the default route,
+	// and a name that is only resolvable through the selected interface (for
+	// example a VPN's DNS server) cannot be looked up.
+	dnsDialer := &net.Dialer{
+		Timeout:   dialer.Timeout,
+		KeepAlive: dialer.KeepAlive,
+		Control:   control,
+	}
+	dialer.Resolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dnsDialer.DialContext(ctx, network, address)
+		},
+	}
+
 	return dialer, nil
 }
