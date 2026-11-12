@@ -17,6 +17,7 @@ This is a command line interface for LibreSpeed speed test backends, written in 
 - Result sharing (telemetry) *[optional]*
 - Test with multiple servers in a single run
 - Use your own server list or telemetry endpoints
+- HTTP/1.1, HTTP/2 and HTTP/3 (QUIC), selectable with `--http-version`
 - Tested with PHP and Go backends
 
 [![asciicast](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2.svg)](https://asciinema.org/a/J17bUAilWI3qR12JyhfGvPwu2)
@@ -198,6 +199,8 @@ GLOBAL OPTIONS:
    --ca-cert value                Use the specified CA certificate PEM bundle file instead
                                   of the system certificate trust store
    --skip-cert-verify             Skip verifying SSL certificate for HTTPS connections (self-signed certs) (default: false)
+   --http-version VERSION         HTTP VERSION for test servers: 1.1, 2, 3, or auto to
+                                  switch to HTTP/3 when advertised and fall back if it fails (default: "auto")
    --no-pre-allocate              Do not pre allocate upload data. Pre allocation is
                                   enabled by default to improve upload performance. To
                                   support systems with insufficient memory, use this
