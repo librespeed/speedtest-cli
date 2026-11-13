@@ -3,6 +3,7 @@ package speedtest
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -28,12 +29,21 @@ const (
 
 // doSpeedTest is where the actual speed test happens
 func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.TelemetryServer, network string, silent bool, noICMP bool) error {
+	// With nothing to test the report would be empty, like when every server
+	// is down (--server -1 with an empty list gets here).
+	if len(servers) == 0 {
+		return errors.New("No server to test: the server list is empty")
+	}
+
 	if serverCount := len(servers); serverCount > 1 {
 		output.WriteUI("Testing against %d servers\n", serverCount)
 	}
 
 	var reps_json []report.JSONReport
 	var reps_csv []report.CSVReport
+	var measured bool
+	// each server that did not answer its probe, and why
+	var down []downServer
 
 	// fetch current user's IP info
 	for _, currentServer := range servers {
@@ -47,13 +57,13 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 
 		output.WriteUI("Selected server: %s [%s]\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
-output.WriteDebug("Testing against %s (%s)\n", output.Sanitize(currentServer.Name), output.Sanitize(u.String()))
+		output.WriteDebug("Testing against %s (%s)\n", output.Sanitize(currentServer.Name), output.Sanitize(u.String()))
 
 		if sponsorMsg := currentServer.Sponsor(); sponsorMsg != "" {
 			output.WriteUI("Sponsored by: %s\n", output.Sanitize(sponsorMsg))
 		}
 
-		if currentServer.IsUp() {
+		if upErr := currentServer.CheckUp(); upErr == nil {
 			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
@@ -61,7 +71,7 @@ output.WriteDebug("Testing against %s (%s)\n", output.Sanitize(currentServer.Nam
 				return err
 			}
 			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
-output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
+			output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 			// get ping and jitter value
 			var pb *spinner.Spinner
@@ -222,14 +232,26 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 				reps_json = append(reps_json, rep)
 			}
+
+			measured = true
 		} else {
 			output.WriteUI("Selected server %s (%s) is not responding at the moment, try again later\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
+			down = append(down, downServer{
+				server: fmt.Sprintf("%s (%s)", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname())),
+				reason: output.Sanitize(upErr.Error()),
+			})
 		}
 
 		//add a new line after each test if testing multiple servers
 		if len(servers) > 1 && !silent {
 			output.WriteUIBlank()
 		}
+	}
+
+	// No server answered: fail instead of printing an empty report, which
+	// with exit status 0 would pass for a result.
+	if !measured && len(down) > 0 {
+		return noneResponding(down)
 	}
 
 	// check for --csv or --json. the program prioritize the --csv before the --json. this is the same behavior as speedtest-cli
@@ -252,6 +274,25 @@ output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 	}
 
 	return nil
+}
+
+// downServer is a selected server that did not answer its probe.
+type downServer struct {
+	server string // name and host, ready to print
+	reason string
+}
+
+// noneResponding names every selected server with its cause. It is printed
+// after "Terminated due to error: ", hence the capital letter.
+func noneResponding(down []downServer) error {
+	if len(down) == 1 {
+		return fmt.Errorf("Selected server %s is not responding: %s", down[0].server, down[0].reason)
+	}
+	causes := make([]string, 0, len(down))
+	for _, d := range down {
+		causes = append(causes, d.server+": "+d.reason)
+	}
+	return fmt.Errorf("None of the %d selected servers is responding: %s", len(down), strings.Join(causes, "; "))
 }
 
 // sendTelemetry sends the telemetry result to server, if --share is given
