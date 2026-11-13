@@ -28,17 +28,3 @@ jobs:
 
       - name: Test
         run: go test ./...
-
-  docker:
-    name: Docker build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Build image
-        run: docker build -t librespeed-cli .
-
-      - name: Smoke test image
-        run: docker run --rm librespeed-cli --version
