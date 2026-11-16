@@ -2,6 +2,7 @@ package speedtest
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,14 @@ import (
 const (
 	// the default ping count for measuring ping and jitter
 	pingCount = 10
+)
+
+// activeTransport routes the test servers' requests; nil until SpeedTest
+// sets it up. telemetryClient sends results over TCP only, even when the
+// telemetry server is also a test server reached over HTTP/3.
+var (
+	activeTransport *protoTransport
+	telemetryClient = http.DefaultClient
 )
 
 // doSpeedTest is where the actual speed test happens
@@ -109,6 +118,12 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				output.WriteUI("Ping: %.2f ms\tJitter: %.2f ms\n", p, jitter)
 			}
 
+			// report what the measurements ran over, which in auto mode can
+			// differ from what the probe above saw
+			if activeTransport != nil {
+				activeTransport.resetObserved(u.Host)
+			}
+
 			// get download value
 			var downloadValue float64
 			var bytesRead uint64
@@ -151,6 +166,20 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				bytesWritten = bw
 
 				output.WriteDebug("Upload test finished in %s: %s, %d byte(s) sent\n", time.Since(uploadStart).Round(time.Millisecond), humanizeRate(upload, c), bw)
+			}
+
+			if activeTransport != nil {
+				if proto, state, ok := activeTransport.observedOn(u.Host); ok && proto != currentServer.Protocol {
+					output.WriteUI("Protocol used by the test: %s\n", proto)
+					currentServer.Protocol = proto
+					currentServer.NegotiatedTLS = nil
+					if state != nil {
+						currentServer.NegotiatedTLS = &defs.TLSInfo{
+							Version: tls.VersionName(state.Version),
+							Cipher:  tls.CipherSuiteName(state.CipherSuite),
+						}
+					}
+				}
 			}
 
 			// print result if --simple is given
@@ -378,7 +407,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	req.Header.Set("Content-Type", wr.FormDataContentType())
 	req.Header.Set("User-Agent", defs.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetryClient.Do(req)
 	if err != nil {
 		output.WriteDebug("Error when making HTTP request: %s\n", err)
 		return "", err

@@ -6,7 +6,7 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/prometheus-community/pro-bing v0.9.1
-	github.com/quic-go/quic-go v0.63.0
+	github.com/quic-go/quic-go v0.65.0
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/sys v0.50.0
 )
@@ -20,9 +20,9 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/term v0.48.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )

@@ -228,7 +228,9 @@ func main() {
 			&cli.StringFlag{
 				Name: defs.OptionHTTPVersion,
 				Usage: "HTTP `VERSION` for test servers: 1.1, 2, 3, or auto to\n" +
-					"\tswitch to HTTP/3 when advertised and fall back if it fails",
+					"\tswitch to HTTP/3 when advertised and fall back if it fails.\n" +
+					"\tHTTP/3 needs https (see --secure) and is not used through\n" +
+					"\tan HTTP(S)_PROXY",
 				Value: "auto",
 			},
 		},

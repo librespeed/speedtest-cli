@@ -252,11 +252,14 @@ func SpeedTest(c *cli.Context) error {
 	// set default HTTP client's Transport to the one that binds the source address
 	// this is modified from http.DefaultTransport
 	transport.DialContext = dialContext
-	pt, err := newProtoTransport(c.String(defs.OptionHTTPVersion), transport, network, dialer)
+	pt, err := newProtoTransport(c.String(defs.OptionHTTPVersion), transport, network, dialer, http.DefaultClient.Timeout)
 	if err != nil {
 		return err
 	}
 	http.DefaultClient.Transport = pt
+	activeTransport = pt
+	// telemetry stays on TCP, even when it shares a host with a test server
+	telemetryClient = &http.Client{Transport: pt.base, Timeout: http.DefaultClient.Timeout}
 
 	// no scheme is forced by default
 	// force https if --secure is given

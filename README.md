@@ -200,7 +200,9 @@ GLOBAL OPTIONS:
                                   of the system certificate trust store
    --skip-cert-verify             Skip verifying SSL certificate for HTTPS connections (self-signed certs) (default: false)
    --http-version VERSION         HTTP VERSION for test servers: 1.1, 2, 3, or auto to
-                                  switch to HTTP/3 when advertised and fall back if it fails (default: "auto")
+                                  switch to HTTP/3 when advertised and fall back if it fails.
+                                  HTTP/3 needs https (see --secure) and is not used through
+                                  an HTTP(S)_PROXY (default: "auto")
    --no-pre-allocate              Do not pre allocate upload data. Pre allocation is
                                   enabled by default to improve upload performance. To
                                   support systems with insufficient memory, use this
