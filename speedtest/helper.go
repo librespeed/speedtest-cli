@@ -64,6 +64,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 
 		if upErr := currentServer.CheckUp(); upErr == nil {
+			output.WriteUI("Protocol: %s\n", currentServer.Protocol)
 			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
@@ -217,6 +218,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
+				rep.Protocol = currentServer.Protocol
 				if currentServer.NegotiatedTLS != nil {
 					rep.TLS = &report.TLSReport{
 						Version: currentServer.NegotiatedTLS.Version,

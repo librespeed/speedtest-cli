@@ -45,6 +45,7 @@ type Server struct {
 	// plain HTTP. Filled by CheckUp (and IsUp, which wraps it), which runs
 	// before every measurement.
 	NegotiatedTLS *TLSInfo `json:"-"`
+	Protocol      string   `json:"-"` // e.g. HTTP/3.0, filled by IsUp too
 }
 
 // TLSInfo names the negotiated TLS parameters of a connection.
@@ -89,6 +90,8 @@ func (s *Server) CheckUp() error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	s.Protocol = resp.Proto
 
 	// Report what the connection actually negotiated. On hardware without AES
 	// acceleration the cipher, not the link, is what bounds the result, and
@@ -301,7 +304,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	}
 
 	for _, addr := range remotes {
-		output.WriteDebug("Pinging %s over TCP (%s)\n", addr, addressFamily(addr))
+		output.WriteDebug("Pinging %s over %s (%s)\n", addr, s.Protocol, addressFamily(addr))
 	}
 
 	// discard first result due to handshake overhead

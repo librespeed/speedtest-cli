@@ -45,4 +45,5 @@ const (
 	OptionTelemetryShare  = "telemetry-share"
 	OptionTelemetryExtra  = "telemetry-extra"
 	OptionFwmark          = "fwmark"
+	OptionHTTPVersion     = "http-version"
 )
