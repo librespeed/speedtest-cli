@@ -67,6 +67,8 @@ builds:
         goarch: amd64
 upx:
   - ids: [upx]
+    goos:
+      - linux
     compress: "9"
     enabled: true
 archives:
