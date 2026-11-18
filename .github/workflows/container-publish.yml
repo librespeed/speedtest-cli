@@ -1,0 +1,73 @@
+name: Publish container
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: container-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check latest stable release
+        id: latest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          latest=$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -n 1)
+          if [ -n "$latest" ] && [ "$RELEASE_TAG" = "$latest" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Container metadata
+        id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: latest=false
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ steps.latest.outputs.enabled == 'true' }}
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+
+      - name: Smoke test published image
+        run: docker run --rm "${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}" --version
