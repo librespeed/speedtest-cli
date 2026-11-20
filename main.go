@@ -225,12 +225,20 @@ func main() {
 				Usage: "firewall mark to set on socket.",
 				Value: 0,
 			},
+			&cli.StringFlag{
+				Name: defs.OptionHTTPVersion,
+				Usage: "HTTP `VERSION` for test servers: 1.1, 2, 3, or auto to\n" +
+					"\tswitch to HTTP/3 when advertised and fall back if it fails.\n" +
+					"\tHTTP/3 needs https (see --secure) and is not used through\n" +
+					"\tan HTTP(S)_PROXY",
+				Value: "auto",
+			},
 		},
 	}
 
 	// run main function with cli options
 	err := app.Run(os.Args)
 	if err != nil {
-		output.Fatalf("Terminated due to error: %s", err)
+		output.Fatalf("Terminated due to error: %s", output.Sanitize(err.Error()))
 	}
 }

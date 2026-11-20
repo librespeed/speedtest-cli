@@ -29,6 +29,25 @@ func (c *BytesCounter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// Discount takes back n bytes counted for a request that failed, so the
+// retry that sends them again does not count them twice.
+func (c *BytesCounter) Discount(n uint64) {
+	c.total.Add(^(n - 1))
+}
+
+// requestCounter counts one request's bytes into a shared counter and keeps
+// its own tally, which Discount can take back if the request fails. The
+// tally is atomic: the transport may still read the body after Do returns.
+type requestCounter struct {
+	shared *BytesCounter
+	n      atomic.Uint64
+}
+
+func (r *requestCounter) Write(p []byte) (int, error) {
+	r.n.Add(uint64(len(p)))
+	return r.shared.Write(p)
+}
+
 // SetBase sets the base for dividing bytes into megabyte or mebibyte
 func (c *BytesCounter) SetMebi(mebi bool) {
 	c.mebi = mebi

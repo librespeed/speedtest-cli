@@ -252,7 +252,14 @@ func SpeedTest(c *cli.Context) error {
 	// set default HTTP client's Transport to the one that binds the source address
 	// this is modified from http.DefaultTransport
 	transport.DialContext = dialContext
-	http.DefaultClient.Transport = transport
+	pt, err := newProtoTransport(c.String(defs.OptionHTTPVersion), transport, network, dialer, http.DefaultClient.Timeout)
+	if err != nil {
+		return err
+	}
+	http.DefaultClient.Transport = pt
+	activeTransport = pt
+	// telemetry stays on TCP, even when it shares a host with a test server
+	telemetryClient = &http.Client{Transport: sanitizingTransport{pt.base}, Timeout: http.DefaultClient.Timeout}
 
 	// no scheme is forced by default
 	// force https if --secure is given
@@ -266,7 +273,6 @@ func SpeedTest(c *cli.Context) error {
 
 	// load server list
 	var servers []defs.Server
-	var err error
 	if str := c.String(defs.OptionLocalJSON); str != "" {
 		switch str {
 		case "-":
@@ -294,8 +300,13 @@ func SpeedTest(c *cli.Context) error {
 		}
 	}
 	if err != nil {
-		output.WriteError("Error when fetching server list: %s\n", err)
+		output.WriteError("Error when fetching server list: %s\n", output.Sanitize(err.Error()))
 		return err
+	}
+	for _, s := range servers {
+		if u, err := s.GetURL(); err == nil {
+			pt.addServer(u.Host)
+		}
 	}
 
 	// if --list is given, list all the servers fetched and exit
