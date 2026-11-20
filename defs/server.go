@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -523,6 +524,9 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	uploadDone := make(chan struct{}, requests)
 
 	var wg sync.WaitGroup
+	// the last error of a failed request; returned if nothing was uploaded,
+	// so a broken path is not reported as a 0 Mbps result
+	var lastErr atomic.Pointer[error]
 
 	doUpload := func() {
 		defer wg.Done()
@@ -533,7 +537,8 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		} else {
 			bodyReader = bytes.NewReader(counter.Payload())
 		}
-		countingReader := io.TeeReader(bodyReader, counter)
+		reqCounter := &requestCounter{shared: counter}
+		countingReader := io.TeeReader(bodyReader, reqCounter)
 
 		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), countingReader)
 		if err != nil {
@@ -559,8 +564,26 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 		resp, err := http.DefaultClient.Do(uploadReq)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				output.WriteDebug("Failed when making HTTP request: %s\n", err)
+			if ctx.Err() != nil {
+				// cancellation is how the test ends, so it is not a failure
+				return
+			}
+			output.WriteDebug("Failed when making HTTP request: %s\n", err)
+			lastErr.Store(&err)
+			// The body cannot be replayed, so the transport does not retry
+			// it. Take back its bytes and let the main loop start a new
+			// request instead, after a pause so a refused connection does
+			// not spin. In auto mode a failed HTTP/3 request has already
+			// moved the server to TCP, so the new request goes over TCP.
+			counter.Discount(reqCounter.n.Load())
+			select {
+			case <-time.After(uploadRetryDelay):
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case uploadDone <- struct{}{}:
+			case <-ctx.Done():
 			}
 			return
 		}
@@ -637,8 +660,14 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
+	if err := lastErr.Load(); err != nil && counter.Total() == 0 {
+		return 0, 0, *err
+	}
 	return counter.AvgMbps(), counter.Total(), nil
 }
+
+// uploadRetryDelay spaces the retries of failed upload requests.
+const uploadRetryDelay = 200 * time.Millisecond
 
 // GetIPInfo accesses the backend's getIP.php endpoint and get current client's IP information
 func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {

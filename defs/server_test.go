@@ -214,3 +214,59 @@ func TestUploadSendsContentLength(t *testing.T) {
 		t.Errorf("counter reported %d bytes, want more than one payload", total)
 	}
 }
+
+// flakyUploadServer drops the connection of the first `failures` POSTs
+// without answering, then answers every POST. It returns the server and the number
+// of body bytes it read from the answered POSTs.
+func flakyUploadServer(t *testing.T, failures int64) (*Server, *atomic.Int64) {
+	t.Helper()
+	var seen, answered atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if seen.Add(1) <= failures {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		n, _ := io.Copy(io.Discard, r.Body)
+		answered.Add(n)
+	}))
+	t.Cleanup(ts.Close)
+	return &Server{Server: ts.URL, UploadURL: "/"}, &answered
+}
+
+// A request that fails mid-test is retried instead of dropped: the body
+// cannot be replayed, so the transport does not retry it, and with a single
+// stream the run would otherwise upload nothing and report 0 Mbps.
+func TestUploadRetriesAFailedRequest(t *testing.T) {
+	s, answered := flakyUploadServer(t, 1)
+	_, total, err := s.Upload(false, true, false, false, 1, 64, time.Second)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if total == 0 || answered.Load() == 0 {
+		t.Fatalf("uploaded %d bytes, server read %d: the failed request was not retried", total, answered.Load())
+	}
+}
+
+// When every request fails there is no measurement, and Upload says so
+// instead of returning 0 Mbps as a result.
+func TestUploadFailsWhenNothingIsUploaded(t *testing.T) {
+	s, _ := flakyUploadServer(t, 1<<30)
+	if _, total, err := s.Upload(false, true, false, false, 1, 64, time.Second); err == nil {
+		t.Fatalf("Upload of %d bytes returned no error while every request failed", total)
+	}
+}
+
+// The bytes of a failed request are taken back, and only those.
+func TestBytesCounterDiscount(t *testing.T) {
+	c := NewCounter()
+	c.Write(make([]byte, 100))
+	r := &requestCounter{shared: c}
+	r.Write(make([]byte, 30))
+	c.Discount(r.n.Load())
+	if got := c.Total(); got != 100 {
+		t.Fatalf("total %d after discounting a failed request, want 100", got)
+	}
+}

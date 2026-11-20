@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,7 +53,7 @@ func newProtoTransport(version string, tcp *http.Transport, network string, dial
 	t := &protoTransport{version: version, tcp: tcp, hosts: map[string]string{}, observed: map[string]*observation{}}
 	switch version {
 	case "auto", "3":
-	case "1.1":
+	case "1", "1.1":
 		t.tcp.Protocols = new(http.Protocols)
 		t.tcp.Protocols.SetHTTP1(true)
 	case "2":
@@ -105,13 +106,56 @@ func (t *protoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	state, isServer := t.hosts[req.URL.Host]
 	t.mu.Unlock()
 	if !isServer {
-		return t.base.RoundTrip(req)
+		return sanitizingTransport{t.base}.RoundTrip(req)
 	}
-	resp, err := t.roundTrip(req, state)
+	resp, err := sanitizingTransport{roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return t.roundTrip(req, state)
+	})}.RoundTrip(req)
 	if err == nil {
 		t.observe(req.URL.Host, resp)
 	}
 	return resp, err
+}
+
+// roundTripFunc lets a function serve as an http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// sanitizingTransport cleans the errors of rt and of the bodies it returns.
+type sanitizingTransport struct{ rt http.RoundTripper }
+
+func (s sanitizingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := s.rt.RoundTrip(req)
+	if err != nil {
+		return nil, sanitizedError{err}
+	}
+	resp.Body = sanitizedBody{resp.Body}
+	return resp, nil
+}
+
+// sanitizedError hides control characters in a network error, which can
+// carry text from the server (an HTTP/3 close reason, a certificate name).
+// Callers print it, so it is cleaned where every request passes. Unwrap
+// keeps errors.Is working, for context.Canceled in particular.
+type sanitizedError struct{ err error }
+
+func (e sanitizedError) Error() string {
+	// errors.Join puts each address's error on its own line
+	return output.Sanitize(strings.ReplaceAll(e.err.Error(), "\n", "; "))
+}
+
+func (e sanitizedError) Unwrap() error { return e.err }
+
+// sanitizedBody does the same for errors met while reading the body.
+type sanitizedBody struct{ io.ReadCloser }
+
+func (b sanitizedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = sanitizedError{err}
+	}
+	return n, err
 }
 
 func (t *protoTransport) roundTrip(req *http.Request, state string) (*http.Response, error) {
@@ -192,9 +236,7 @@ func proxyError(proxy string, err error) error {
 // h3Failure describes a failed HTTP/3 request. err can carry text from the
 // server, such as certificate names, so it is sanitized like the host.
 func h3Failure(host string, err error) string {
-	// errors.Join puts each address's error on its own line
-	msg := strings.ReplaceAll(err.Error(), "\n", "; ")
-	return fmt.Sprintf("HTTP/3 to %s failed: %s", output.Sanitize(host), output.Sanitize(msg))
+	return fmt.Sprintf("HTTP/3 to %s failed: %s", output.Sanitize(host), sanitizedError{err})
 }
 
 func (t *protoTransport) setState(host, state string) {
@@ -261,12 +303,14 @@ type altSvc struct {
 func parseAltSvc(values []string) []altSvc {
 	var alts []altSvc
 	for _, v := range values {
-		for entry := range strings.SplitSeq(v, ",") {
+		for _, entry := range splitUnquoted(v, ',') {
 			entry = strings.TrimSpace(entry)
-			if entry == "clear" {
+			// RFC 7838 spells it in lower case; any case is taken here, as
+			// staying on TCP is the safe reading
+			if strings.EqualFold(entry, "clear") {
 				return nil
 			}
-			params := strings.Split(entry, ";")
+			params := splitUnquoted(entry, ';')
 			protocol, authority, ok := strings.Cut(params[0], "=")
 			if !ok {
 				continue
@@ -285,7 +329,15 @@ func parseAltSvc(values []string) []altSvc {
 			withdrawn := false
 			for _, param := range params[1:] {
 				name, value, _ := strings.Cut(strings.TrimSpace(param), "=")
-				if strings.EqualFold(strings.TrimSpace(name), "ma") && strings.Trim(strings.TrimSpace(value), `"`) == "0" {
+				if !strings.EqualFold(strings.TrimSpace(name), "ma") {
+					continue
+				}
+				value = strings.TrimSpace(value)
+				if unquoted, err := strconv.Unquote(value); err == nil {
+					value = unquoted
+				}
+				// delta-seconds: ma=00 withdraws the alternative like ma=0
+				if ma, err := strconv.ParseUint(value, 10, 64); err == nil && ma == 0 {
 					withdrawn = true
 				}
 			}
@@ -295,6 +347,27 @@ func parseAltSvc(values []string) []altSvc {
 		}
 	}
 	return alts
+}
+
+// splitUnquoted splits s at each sep outside a quoted string, so a quoted
+// parameter value cannot end an entry or start a new parameter.
+func splitUnquoted(s string, sep byte) []string {
+	var parts []string
+	quoted, escaped, start := false, false, 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case escaped:
+			escaped = false
+		case quoted && c == '\\':
+			escaped = true
+		case c == '"':
+			quoted = !quoted
+		case !quoted && c == sep:
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(parts, s[start:])
 }
 
 func replayable(req *http.Request) bool {
@@ -311,6 +384,9 @@ func dialQUIC(ctx context.Context, network string, dialer *net.Dialer, addr stri
 	ips, err := net.DefaultResolver.LookupIP(ctx, network, host)
 	if err != nil {
 		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no address found for %s", host)
 	}
 	return dialQUICAddrs(ctx, ips, port, dialer, tlsConf, quicConf)
 }
@@ -343,17 +419,24 @@ func dialQUICAddrs(ctx context.Context, ips []net.IP, port string, dialer *net.D
 			errs = append(errs, fmt.Errorf("%s: %w", ip, err))
 			continue
 		}
+		// quic-go closes only the sockets it opened itself, so pc is closed
+		// here after the transport, on both paths
 		tr := &quic.Transport{Conn: pc}
 		conn, err := tr.DialEarly(ctx, raddr, tlsConf, quicConf)
 		if err == nil {
-			go func() { <-conn.Context().Done(); tr.Close() }()
+			go func() { <-conn.Context().Done(); tr.Close(); pc.Close() }()
 			return conn, nil
 		}
 		tr.Close()
+		pc.Close()
 		errs = append(errs, fmt.Errorf("%s: %w", ip, err))
 		if ctx.Err() != nil {
 			break
 		}
+	}
+	if len(errs) == 0 {
+		// never a nil connection with a nil error: http3 would dereference it
+		return nil, errors.New("no address to dial")
 	}
 	return nil, errors.Join(errs...)
 }

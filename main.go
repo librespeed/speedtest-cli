@@ -239,6 +239,6 @@ func main() {
 	// run main function with cli options
 	err := app.Run(os.Args)
 	if err != nil {
-		output.Fatalf("Terminated due to error: %s", err)
+		output.Fatalf("Terminated due to error: %s", output.Sanitize(err.Error()))
 	}
 }

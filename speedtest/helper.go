@@ -77,7 +77,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
-				output.WriteError("Failed to get IP info: %s\n", err)
+				output.WriteError("Failed to get IP info: %s\n", output.Sanitize(err.Error()))
 				return err
 			}
 			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
@@ -104,7 +104,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {
-				output.WriteError("Failed to get ping and jitter: %s\n", err)
+				output.WriteError("Failed to get ping and jitter: %s\n", output.Sanitize(err.Error()))
 				return err
 			}
 
@@ -137,7 +137,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get download speed: %s\n", err)
+					output.WriteError("Failed to get download speed: %s\n", output.Sanitize(err.Error()))
 					return err
 				}
 				downloadValue = download
@@ -159,7 +159,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get upload speed: %s\n", err)
+					output.WriteError("Failed to get upload speed: %s\n", output.Sanitize(err.Error()))
 					return err
 				}
 				uploadValue = upload
@@ -200,7 +200,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				extra.Extra = c.String(defs.OptionTelemetryExtra)
 
 				if link, err := sendTelemetry(telemetryServer, ispInfo, downloadValue, uploadValue, p, jitter, currentServer.TLog.String(), extra); err != nil {
-					output.WriteError("Error when sending telemetry data: %s\n", err)
+					output.WriteError("Error when sending telemetry data: %s\n", output.Sanitize(err.Error()))
 				} else {
 					shareLink = link
 					// only print to stdout when --json and --csv are not used
@@ -416,7 +416,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 
 	id, err := io.ReadAll(resp.Body)
 	if err != nil {
-		output.WriteError("Error when reading HTTP request: %s\n", err)
+		output.WriteError("Error when reading HTTP request: %s\n", output.Sanitize(err.Error()))
 		return "", err
 	}
 
