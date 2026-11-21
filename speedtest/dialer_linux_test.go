@@ -42,3 +42,20 @@ func TestInterfaceThatCannotBeBoundFailsTheDialDespiteTheMark(t *testing.T) {
 		t.Errorf("error = %v with a mark, want the one from the binding: %v", withMark, binding)
 	}
 }
+
+// --source can be combined with --fwmark. The dialer that sets the mark has
+// to keep the source address.
+func TestMarkedDialerKeepsTheSourceAddress(t *testing.T) {
+	source := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1")}}
+
+	dialer, err := boundDialer(source, "", 7)
+	if err != nil {
+		t.Fatalf("boundDialer: %v", err)
+	}
+	if dialer.LocalAddr != source.LocalAddr {
+		t.Errorf("LocalAddr = %v, want the source address %v", dialer.LocalAddr, source.LocalAddr)
+	}
+	if dialer.Control == nil {
+		t.Error("the dialer does not set the mark")
+	}
+}

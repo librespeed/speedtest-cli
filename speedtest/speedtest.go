@@ -250,7 +250,7 @@ func SpeedTest(c *cli.Context) error {
 
 	if iface != "" || fwmark > 0 {
 		var err error
-		dialer, err = newDialerInterfaceOrFwmarkBound(iface, fwmark)
+		dialer, err = boundDialer(dialer, iface, fwmark)
 		if err != nil {
 			return err
 		}
@@ -575,6 +575,18 @@ func contains(arr []int, val int) bool {
 		}
 	}
 	return false
+}
+
+// boundDialer returns a dialer bound to iface and marked with fwmark. It
+// keeps the source address of the dialer given: --source can be combined
+// with --fwmark.
+func boundDialer(dialer *net.Dialer, iface string, fwmark int) (*net.Dialer, error) {
+	bound, err := newDialerInterfaceOrFwmarkBound(iface, fwmark)
+	if err != nil {
+		return nil, err
+	}
+	bound.LocalAddr = dialer.LocalAddr
+	return bound, nil
 }
 
 func newDialerAddressBound(src string, network string) (dialer *net.Dialer, err error) {
