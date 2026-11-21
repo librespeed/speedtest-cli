@@ -160,13 +160,12 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 		return 0, 0, err
 	}
 
-	p, err := probing.NewPinger(u.Hostname())
+	p, err := newPinger(u.Hostname(), network)
 	if err != nil {
 		output.WriteDebug("Failed to resolve ping target: %s\n", err)
 		output.WriteDebug("Will try TCP ping\n")
 		return s.PingAndJitter(count + 2)
 	}
-	p.SetNetwork(network)
 	p.Count = count
 	p.Timeout = time.Duration(count) * time.Second
 	if srcIp != "" {
@@ -226,6 +225,18 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	}
 
 	return rttMillis(stats.AvgRtt), jitter, nil
+}
+
+// newPinger returns a pinger for host, resolved within network ("ip", "ip4"
+// or "ip6"). The network is set before resolving: probing.NewPinger resolves
+// at once with "ip", and a pinger that has an address does not resolve again.
+func newPinger(host, network string) (*probing.Pinger, error) {
+	p := probing.New(host)
+	p.SetNetwork(network)
+	if err := p.Resolve(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // addressFamily names the IP version of an address, for reporting which path a
