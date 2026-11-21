@@ -1,6 +1,9 @@
 package speedtest
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestWellKnownServerURL(t *testing.T) {
 	cases := []struct {
@@ -46,5 +49,27 @@ func TestWellKnownServerURL(t *testing.T) {
 				t.Errorf("wellKnownServerURL(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+// The workers can all be done while their results still wait in the channel.
+// Those results count like any other: one of them may be the fastest server.
+func TestCollectPingsKeepsTheResultsOfWorkersThatAreDone(t *testing.T) {
+	// far more than a real list has, so that collecting them takes long
+	// enough for the "all done" signal to arrive in the middle
+	const servers = 5000
+
+	for round := 0; round < 20; round++ {
+		var wg sync.WaitGroup
+		results := make(chan PingResult, servers)
+		for i := 0; i < servers; i++ {
+			wg.Add(1)
+			results <- PingResult{Index: i, Ping: float64(i + 1)}
+			wg.Done()
+		}
+
+		if got := len(collectPings(results, &wg)); got != servers {
+			t.Fatalf("collected %d of %d results", got, servers)
+		}
 	}
 }

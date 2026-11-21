@@ -322,9 +322,6 @@ func SpeedTest(c *cli.Context) error {
 		var wg sync.WaitGroup
 		jobs := make(chan PingJob, len(servers))
 		results := make(chan PingResult, len(servers))
-		done := make(chan struct{})
-
-		pingList := make(map[int]float64)
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
@@ -338,20 +335,7 @@ func SpeedTest(c *cli.Context) error {
 		}
 		close(jobs)
 
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-	Loop:
-		for {
-			select {
-			case result := <-results:
-				pingList[result.Index] = result.Ping
-			case <-done:
-				break Loop
-			}
-		}
+		pingList := collectPings(results, &wg)
 
 		if len(pingList) == 0 {
 			output.Fatal("No server is currently available, please try again later.")
@@ -374,6 +358,22 @@ func SpeedTest(c *cli.Context) error {
 		// do speed test on the server
 		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent, noICMP)
 	}
+}
+
+// collectPings gathers the ping of every server that answered. It reads the
+// results until the workers are done and the channel is closed, so a result
+// that is still in the channel when the last worker finishes is not lost.
+func collectPings(results chan PingResult, wg *sync.WaitGroup) map[int]float64 {
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	pingList := make(map[int]float64)
+	for result := range results {
+		pingList[result.Index] = result.Ping
+	}
+	return pingList
 }
 
 func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string, noICMP bool) {
