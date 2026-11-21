@@ -29,6 +29,11 @@ func (c *BytesCounter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// Discount takes back n bytes that were counted for a request that failed.
+func (c *BytesCounter) Discount(n uint64) {
+	c.total.Add(^(n - 1))
+}
+
 // SetBase sets the base for dividing bytes into megabyte or mebibyte
 func (c *BytesCounter) SetMebi(mebi bool) {
 	c.mebi = mebi
