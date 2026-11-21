@@ -101,6 +101,21 @@ func SpeedTest(c *cli.Context) error {
 		return fmt.Errorf("incompatible options '%s' and '%s'", defs.OptionSource, defs.OptionInterface)
 	}
 
+	// These pairs contradict each other: only one address family and one
+	// scheme can be forced, and --simple would print its lines into the JSON,
+	// the CSV or the event stream.
+	for _, pair := range [][2]string{
+		{defs.OptionIPv4, defs.OptionIPv6},
+		{defs.OptionSecure, defs.OptionInsecure},
+		{defs.OptionSimple, defs.OptionJSON},
+		{defs.OptionSimple, defs.OptionCSV},
+		{defs.OptionSimple, defs.OptionJSONStream},
+	} {
+		if c.Bool(pair[0]) && c.Bool(pair[1]) {
+			return fmt.Errorf("incompatible options '%s' and '%s'", pair[0], pair[1])
+		}
+	}
+
 	// set CSV delimiter
 	gocsv.TagSeparator = c.String(defs.OptionCSVDelimiter)
 
