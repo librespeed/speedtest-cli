@@ -215,7 +215,11 @@ func SpeedTest(c *cli.Context) error {
 			output.Fatal(err)
 		}
 		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
+		// An empty pool would fail every HTTPS request for an unknown
+		// authority, unless verification is off and the pool is not used.
+		if !caCertPool.AppendCertsFromPEM(caCert) && !c.Bool(defs.OptionSkipCertVerify) {
+			return fmt.Errorf("no certificate found in %s", caCertFileName)
+		}
 
 		transport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
