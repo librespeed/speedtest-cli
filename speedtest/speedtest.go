@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,12 @@ const (
 	defaultTelemetryServer = "https://librespeed.org"
 	defaultTelemetryPath   = "/results/telemetry.php"
 	defaultTelemetryShare  = "/results/"
+
+	// maxUploadSize is the largest --upload-size, in KiB: the most whose
+	// byte count fits an int on a 32-bit system, just under 2 GiB. The same
+	// limit holds everywhere, so an option value works on one system if it
+	// works on another.
+	maxUploadSize = math.MaxInt32 / 1024
 
 	forceNothing = 0
 	forceHttps   = 1
@@ -163,6 +170,19 @@ func SpeedTest(c *cli.Context) error {
 	if req := c.Int(defs.OptionConcurrent); req <= 0 {
 		output.WriteError("Concurrent requests cannot be lower than 1: %d is given\n", req)
 		return errors.New("invalid concurrent requests setting")
+	}
+
+	// The upload payload is allocated in one piece of that many KiB. The
+	// size is not used where there is no upload, or no payload to allocate.
+	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) {
+		switch {
+		case size < 1:
+			output.WriteError("Upload size cannot be lower than 1 KiB: %d is given\n", size)
+			return errors.New("invalid upload size setting")
+		case size > maxUploadSize:
+			output.WriteError("Upload size cannot be more than %d KiB: %d is given\n", maxUploadSize, size)
+			return errors.New("invalid upload size setting")
+		}
 	}
 
 	noICMP := c.Bool(defs.OptionNoICMP)
