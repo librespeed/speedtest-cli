@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -89,28 +88,42 @@ func TestSecureRefusesARedirectedDownload(t *testing.T) {
 	}
 }
 
-// And when only the upload is redirected. An upload does not follow a
-// redirect, so a 302 and a 307 both arrive as a status. Neither is a
-// result, and neither sends anything on over plain HTTP.
+// And when only the upload is redirected. A server whose probe was not
+// redirected is not asked where its upload URL is, so the redirect meets the
+// payload, which does not follow it and gets it as a status. A server that
+// redirected its probe, here to another HTTPS URL, is asked first, and the
+// redirect is refused there. Nothing goes on over plain HTTP in any of these.
 func TestSecureRefusesARedirectedUpload(t *testing.T) {
 	for _, tc := range []struct {
-		status int
-		want   string
+		name            string
+		status          int
+		probeRedirected bool
+		want            string
 	}{
-		{http.StatusFound, "the upload request returned HTTP 302 Found"},
-		{http.StatusTemporaryRedirect, "the upload request returned HTTP 307 Temporary Redirect"},
+		{"302", http.StatusFound, false, "the upload request returned HTTP 302 Found"},
+		{"307", http.StatusTemporaryRedirect, false, "the upload request returned HTTP 307 Temporary Redirect"},
+		{"302 after a redirected probe", http.StatusFound, true, refusedRedirect},
+		{"307 after a redirected probe", http.StatusTemporaryRedirect, true, refusedRedirect},
 	} {
-		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var overPlainHTTP atomic.Int64
 			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				overPlainHTTP.Add(1)
 			}))
 			t.Cleanup(backend.Close)
 
+			var questions, payloads atomic.Int64
 			front := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodPost:
+					if r.ContentLength == 0 {
+						questions.Add(1)
+					} else {
+						payloads.Add(1)
+					}
 					http.Redirect(w, r, backend.URL+r.URL.RequestURI(), tc.status)
+				case r.URL.Path == "/empty.php" && tc.probeRedirected:
+					http.Redirect(w, r, "/moved.php", http.StatusMovedPermanently)
 				case r.URL.Path == "/getIP.php":
 					w.Write([]byte(`{"processedString":"127.0.0.1 - localhost","rawIspInfo":""}`))
 				}
@@ -134,6 +147,77 @@ func TestSecureRefusesARedirectedUpload(t *testing.T) {
 			}
 			if n := overPlainHTTP.Load(); n != 0 {
 				t.Errorf("%d requests went on over plain HTTP, want none", n)
+			}
+			// where the redirect was met: at the empty POST that asks, or at
+			// the payload
+			asked, sent := questions.Load(), payloads.Load()
+			if tc.probeRedirected && (asked != 1 || sent != 0) {
+				t.Errorf("%d empty POSTs and %d with a payload, want one and none", asked, sent)
+			}
+			if !tc.probeRedirected && (asked != 0 || sent == 0) {
+				t.Errorf("%d empty POSTs and %d with a payload, want none and some", asked, sent)
+			}
+		})
+	}
+}
+
+// An upload that an HTTPS server redirects to another HTTPS server stays
+// where it is, with --secure or without it. Not a request of any kind goes to
+// the other server.
+func TestARedirectedUploadStaysWithItsServer(t *testing.T) {
+	for _, secure := range []bool{false, true} {
+		name := "without --secure"
+		if secure {
+			name = "with --secure"
+		}
+		t.Run(name, func(t *testing.T) {
+			var elsewhere atomic.Int64
+			other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				elsewhere.Add(1)
+			}))
+			t.Cleanup(other.Close)
+
+			var questions, payloads atomic.Int64
+			front := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost:
+					if r.ContentLength == 0 {
+						questions.Add(1)
+					} else {
+						payloads.Add(1)
+					}
+					http.Redirect(w, r, other.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+				case r.URL.Path == "/empty.php":
+					http.Redirect(w, r, "/moved.php", http.StatusMovedPermanently)
+				case r.URL.Path == "/getIP.php":
+					w.Write([]byte(`{"processedString":"127.0.0.1 - localhost","rawIspInfo":""}`))
+				}
+			}))
+			t.Cleanup(front.Close)
+
+			list := writeServerList(t, listedServer{1, "Front", front.URL, "empty.php"})
+			args := []string{"--local-json", list, "--server", "1", "--skip-cert-verify",
+				"--duration", "1", "--no-icmp", "--no-download", "--upload-size", "16", "--json"}
+			if secure {
+				args = append(args, "--secure")
+			}
+			r := runCLI(t, args...)
+
+			if r.code != 1 {
+				t.Errorf("exit status %d, want 1, stderr:\n%s", r.code, r.stderr)
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout = %q, want no report", r.stdout)
+			}
+			const refused = "the upload URL redirects to another server"
+			if msg := r.failure(t); !strings.HasSuffix(msg, refused) {
+				t.Errorf("error = %q, want it to end in %q", msg, refused)
+			}
+			if n := elsewhere.Load(); n != 0 {
+				t.Errorf("%d requests went to the other server, want none", n)
+			}
+			if asked, sent := questions.Load(), payloads.Load(); asked != 1 || sent != 0 {
+				t.Errorf("%d empty POSTs and %d with a payload, want one and none", asked, sent)
 			}
 		})
 	}

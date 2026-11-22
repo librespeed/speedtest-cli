@@ -47,6 +47,13 @@ type Server struct {
 	// before every measurement.
 	NegotiatedTLS *TLSInfo `json:"-"`
 	Protocol      string   `json:"-"` // e.g. HTTP/3.0, filled by IsUp too
+
+	// Whether the probe of this server was redirected. Filled by CheckUp,
+	// like NegotiatedTLS. Only such a server is asked where its upload URL
+	// is, see Upload. A server that redirects the POST of its upload and not
+	// the GET of the probe is not asked, so its upload gets the redirect as
+	// its answer and fails.
+	probeRedirected bool
 }
 
 // TLSInfo names the negotiated TLS parameters of a connection.
@@ -65,12 +72,16 @@ func (s *Server) IsUp() bool {
 
 // CheckUp checks the speed test backend is up by accessing the ping URL,
 // which must answer 200 with an empty body, and returns why it is not up.
-// Like IsUp, it records the negotiated TLS in s.NegotiatedTLS.
+// Like IsUp, it records the negotiated TLS in s.NegotiatedTLS, and whether
+// the probe was redirected.
 func (s *Server) CheckUp() error {
 	t := time.Now()
 	defer func() {
 		s.TLog.Logf("Check backend is up took %s", time.Since(t).String())
 	}()
+
+	// not known until this probe is answered
+	s.probeRedirected = false
 
 	u, err := s.GetURL()
 	if err != nil {
@@ -93,6 +104,8 @@ func (s *Server) CheckUp() error {
 	defer resp.Body.Close()
 
 	s.Protocol = resp.Proto
+	// the last request has a redirect behind it if the client followed one
+	s.probeRedirected = resp.Request != nil && resp.Request.Response != nil
 
 	// Report what the connection actually negotiated. On hardware without AES
 	// acceleration the cipher, not the link, is what bounds the result, and
@@ -591,6 +604,16 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	defer cancel()
 	u.Path = path.Join(u.Path, s.UploadURL)
 
+	// The payload has to go where the upload URL is, and a redirect moves
+	// it. A server whose probe was redirected is asked for that place. One
+	// whose probe was not gets no request it did not get before.
+	if s.probeRedirected {
+		if u, err = uploadTarget(ctx, u); err != nil {
+			output.WriteDebug("Failed to follow the upload URL: %s\n", output.Sanitize(err.Error()))
+			return 0, 0, err
+		}
+	}
+
 	// each finished request hands its worker back for a replacement
 	uploadDone := make(chan int, requests)
 
@@ -884,6 +907,125 @@ func (s *sentBytes) discount() {
 // and no faster beyond. It stays well below the 4 MiB stream window of Go's
 // HTTP/2 client, so the server is never left waiting for window.
 const downloadReadSize = 256 << 10
+
+// uploadProbeTimeout is how long uploadTarget may take in all.
+var uploadProbeTimeout = 5 * time.Second
+
+// uploadTarget finds where the upload URL is, by sending it a POST without a
+// body and going where the answers point. The HTTP client does not do that
+// with the payload: it follows a POST answered with 301 or 302 as a GET, and
+// it cannot send the body again on 307 or 308. The payload would go to a
+// server that only redirects, and nothing behind it would be measured.
+//
+// A 303 is left alone. It answers a POST the server has taken and names a
+// page to read, not another place to send the data to.
+//
+// Upload does not call this for a server whose probe was answered without
+// a redirect. One that redirects a POST and not the GET of the probe is
+// therefore tested as before.
+//
+// The payload stays with the listed server. A redirect may lead to another
+// path there, and from plain HTTP to HTTPS, which is what the public servers
+// that redirect their upload do. A redirect to another host or port is an
+// error, and so is one that the client's policy refuses. Nothing is sent to
+// the place such a redirect names.
+//
+// Unless the redirects end at a place that takes the empty POST, the test
+// runs against the listed URL as it did before. That POST shows only that
+// the place answers. Whether it reads the payload is not known, just as it
+// is not known for the listed URL.
+func uploadTarget(ctx context.Context, listed *url.URL) (*url.URL, error) {
+	client := *http.DefaultClient
+	policy := client.CheckRedirect
+	if policy == nil {
+		// what the client does on its own
+		policy = func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		}
+	}
+	// the answers are needed as they are, not as the client follows them
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, uploadProbeTimeout)
+	defer cancel()
+
+	target := listed
+	var via []*http.Request
+	var redirect *http.Response
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), nil)
+		if err != nil {
+			return listed, nil
+		}
+		req.Header.Set("User-Agent", UserAgent)
+		if redirect != nil {
+			// the policy gets the request the way the client hands it over
+			req.Response = redirect
+			if err := policy(req, via); err != nil {
+				return nil, &url.Error{Op: "Post", URL: withoutQuery(target), Err: err}
+			}
+			if !sameServer(listed, target) {
+				return nil, &url.Error{Op: "Post", URL: withoutQuery(target), Err: errors.New("the upload URL redirects to another server")}
+			}
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			output.WriteDebug("Could not ask where the upload URL is: %s\n", output.Sanitize(err.Error()))
+			return listed, nil
+		}
+		// a short page is read, so that the next hop can use the connection
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 2<<10))
+		resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+			location := resp.Header.Get("Location")
+			next, err := target.Parse(location)
+			if location == "" || err != nil {
+				output.WriteDebug("The upload URL redirects without a usable Location\n")
+				return listed, nil
+			}
+			output.WriteDebug("The upload URL redirects to %s\n", output.Sanitize(withoutQuery(next)))
+			via = append(via, req)
+			redirect = resp
+			target = next
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			if redirect != nil {
+				output.WriteDebug("The upload URL redirects to a place that answers HTTP %d, using the listed one\n", resp.StatusCode)
+			}
+			return listed, nil
+		}
+		return target, nil
+	}
+}
+
+// sameServer reports whether next is at the server of the listed URL: its
+// host and port are written as the listed URL writes them, and its scheme
+// is the same or HTTPS in place of plain HTTP. The transport knows a test
+// server by that host and port, so the upload goes over --http-version and
+// is seen in the protocol report.
+func sameServer(listed, next *url.URL) bool {
+	return listed.Host == next.Host &&
+		(listed.Scheme == next.Scheme || listed.Scheme == "http" && next.Scheme == "https")
+}
+
+// withoutQuery is u as a message shows it: without a password, a query or a
+// fragment, any of which can carry a token.
+func withoutQuery(u *url.URL) string {
+	shown := *u
+	shown.RawQuery, shown.ForceQuery = "", false
+	shown.Fragment, shown.RawFragment = "", ""
+	return shown.Redacted()
+}
 
 // retryDelay spaces the requests that follow a failed one, so that a wrong
 // URL is not asked for as fast as the server can refuse it.
