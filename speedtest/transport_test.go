@@ -19,7 +19,10 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+
+	"github.com/librespeed/speedtest-cli/defs"
 )
 
 // testServer serves TCP and, if h3, QUIC on the same port, replying with the
@@ -393,5 +396,67 @@ func TestTransportSanitizesErrors(t *testing.T) {
 	body = sanitizedBody{io.NopCloser(strings.NewReader(""))}
 	if _, err := body.Read(make([]byte, 1)); err != io.EOF {
 		t.Errorf("body read at the end returned %v, want io.EOF itself", err)
+	}
+}
+
+// countingServer serves TCP and QUIC like testServer and counts the
+// connections each one accepted.
+func countingServer(t *testing.T) (srv *httptest.Server, tcpConns, quicConns *atomic.Int32) {
+	tcpConns, quicConns = new(atomic.Int32), new(atomic.Int32)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		io.WriteString(w, r.Proto)
+	})
+	srv = httptest.NewUnstartedServer(handler)
+	srv.EnableHTTP2 = true
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			tcpConns.Add(1)
+		}
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	udp, err := net.ListenPacket("udp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Skip(err)
+	}
+	s := &http3.Server{Handler: handler, TLSConfig: http3.ConfigureTLSConfig(srv.TLS.Clone()),
+		ConnContext: func(ctx context.Context, _ *quic.Conn) context.Context {
+			quicConns.Add(1)
+			return ctx
+		}}
+	go s.Serve(udp)
+	t.Cleanup(func() { s.Close() })
+	return srv, tcpConns, quicConns
+}
+
+// Each download and upload worker gets its own connection in every version,
+// as HTTP/1.1 always did: HTTP/2 and HTTP/3 would put them all on one.
+// Requests outside the workers share one more.
+func TestWorkersGetTheirOwnConnection(t *testing.T) {
+	for _, version := range []string{"1.1", "2", "3"} {
+		t.Run(version, func(t *testing.T) {
+			srv, tcpConns, quicConns := countingServer(t)
+			c := newTestClient(t, version, srv)
+			for range 2 {
+				protoOf(t, c, http.MethodGet, srv.URL)
+				for worker := range 3 {
+					req, _ := http.NewRequestWithContext(defs.WithWorker(context.Background(), worker), http.MethodGet, srv.URL, nil)
+					resp, err := c.Do(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+				}
+			}
+			conns := tcpConns.Load()
+			if version == "3" {
+				conns = quicConns.Load()
+			}
+			if conns != 4 {
+				t.Fatalf("%d connections for 3 workers and the shared requests, want 4", conns)
+			}
+		})
 	}
 }

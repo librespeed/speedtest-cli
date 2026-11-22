@@ -18,6 +18,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
+	"github.com/librespeed/speedtest-cli/defs"
 	"github.com/librespeed/speedtest-cli/output"
 )
 
@@ -30,15 +31,26 @@ const maxH3Handshake = 3 * time.Second
 // In auto mode a server moves to HTTP/3 once it advertises it via Alt-Svc,
 // and back to TCP if QUIC then fails. A forced version never falls back.
 // HTTP/3 is never used through a proxy: QUIC cannot go through one.
+// Each download and upload worker gets its own connection: HTTP/2 and HTTP/3
+// would otherwise carry every stream over one connection, with one
+// congestion window, where HTTP/1.1 opens one per stream.
 type protoTransport struct {
 	version string
 	base    *http.Transport
-	tcp     *http.Transport
+	tcp     *http.Transport // requests outside the workers: probe, IP info
 	h3      *http3.Transport
+	newH3   func() *http3.Transport
 
 	mu       sync.Mutex
 	hosts    map[string]string // test servers: "", "h3" or "tcp" in auto mode
 	observed map[string]*observation
+	workers  map[int]workerTransports
+}
+
+// workerTransports are the transports of one download or upload worker.
+type workerTransports struct {
+	tcp *http.Transport
+	h3  *http3.Transport
 }
 
 // observation is what the responses from one test server actually ran over.
@@ -50,7 +62,7 @@ type observation struct {
 // newProtoTransport wraps tcp. timeout is the client's timeout, which bounds
 // the QUIC handshake in auto mode so a TCP retry still fits in it.
 func newProtoTransport(version string, tcp *http.Transport, network string, dialer *net.Dialer, timeout time.Duration) (*protoTransport, error) {
-	t := &protoTransport{version: version, tcp: tcp, hosts: map[string]string{}, observed: map[string]*observation{}}
+	t := &protoTransport{version: version, tcp: tcp, hosts: map[string]string{}, observed: map[string]*observation{}, workers: map[int]workerTransports{}}
 	switch version {
 	case "auto", "3":
 	case "1", "1.1":
@@ -74,14 +86,34 @@ func newProtoTransport(version string, tcp *http.Transport, network string, dial
 	if version == "auto" {
 		quicConf.HandshakeIdleTimeout = handshakeBudget(timeout)
 	}
-	t.h3 = &http3.Transport{
-		TLSClientConfig: tcp.TLSClientConfig.Clone(),
-		QUICConfig:      quicConf,
-		Dial: func(ctx context.Context, addr string, tlsConf *tls.Config, quicConf *quic.Config) (*quic.Conn, error) {
-			return dialQUIC(ctx, network, dialer, addr, tlsConf, quicConf)
-		},
+	t.newH3 = func() *http3.Transport {
+		return &http3.Transport{
+			TLSClientConfig: tcp.TLSClientConfig.Clone(),
+			QUICConfig:      quicConf.Clone(),
+			Dial: func(ctx context.Context, addr string, tlsConf *tls.Config, quicConf *quic.Config) (*quic.Conn, error) {
+				return dialQUIC(ctx, network, dialer, addr, tlsConf, quicConf)
+			},
+		}
 	}
+	t.h3 = t.newH3()
 	return t, nil
+}
+
+// transportsFor returns the transports of the worker that sent req, made on
+// its first request, or the shared ones for a request outside the workers.
+func (t *protoTransport) transportsFor(req *http.Request) (*http.Transport, *http3.Transport) {
+	worker, ok := defs.Worker(req.Context())
+	if !ok {
+		return t.tcp, t.h3
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w, ok := t.workers[worker]
+	if !ok {
+		w = workerTransports{tcp: t.tcp.Clone(), h3: t.newH3()}
+		t.workers[worker] = w
+	}
+	return w.tcp, w.h3
 }
 
 // handshakeBudget leaves at least two thirds of the client timeout for TCP.
@@ -159,6 +191,7 @@ func (b sanitizedBody) Read(p []byte) (int, error) {
 }
 
 func (t *protoTransport) roundTrip(req *http.Request, state string) (*http.Response, error) {
+	tcp, h3 := t.transportsFor(req)
 	switch {
 	case t.version == "3":
 		if req.URL.Scheme != "https" {
@@ -171,22 +204,22 @@ func (t *protoTransport) roundTrip(req *http.Request, state string) (*http.Respo
 			output.WriteError("%s\n", h3Failure(req.URL.Host, err))
 			return nil, err
 		}
-		resp, err := t.h3.RoundTrip(req)
+		resp, err := h3.RoundTrip(req)
 		if err != nil && req.Context().Err() == nil {
 			output.WriteError("%s\n", h3Failure(req.URL.Host, err))
 		}
 		return resp, err
 	case t.version != "auto" || req.URL.Scheme != "https":
-		return t.tcp.RoundTrip(req)
+		return tcp.RoundTrip(req)
 	}
 
 	// auto: a proxy keeps every request on TCP, through the proxy
 	if proxy, err := t.proxyFor(req); proxy != "" || err != nil {
-		return t.tcp.RoundTrip(req)
+		return tcp.RoundTrip(req)
 	}
 
 	if state == "h3" {
-		resp, err := t.h3.RoundTrip(req)
+		resp, err := h3.RoundTrip(req)
 		// no time left for TCP once the caller's context is done
 		if err == nil || req.Context().Err() != nil {
 			return resp, err
@@ -196,10 +229,10 @@ func (t *protoTransport) roundTrip(req *http.Request, state string) (*http.Respo
 		if !replayable(req) {
 			return nil, err
 		}
-		return t.tcp.RoundTrip(req)
+		return tcp.RoundTrip(req)
 	}
 
-	resp, err := t.tcp.RoundTrip(req)
+	resp, err := tcp.RoundTrip(req)
 	if err != nil || state != "" || !advertisesH3(resp, req.URL) {
 		return resp, err
 	}

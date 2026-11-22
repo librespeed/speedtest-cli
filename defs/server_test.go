@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -281,5 +282,54 @@ func TestUploadCountsRequestsThatTimeOut(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := received.Load(); total < uint64(got)/2 {
 		t.Fatalf("reported %d bytes while the server received %d", total, got)
+	}
+}
+
+// workerRecorder records the worker each request was tagged with.
+type workerRecorder struct {
+	mu      sync.Mutex
+	workers map[int]bool
+}
+
+func (r *workerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	if w, ok := Worker(req.Context()); ok {
+		r.mu.Lock()
+		r.workers[w] = true
+		r.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// Download and Upload tag each request with its worker, so the transport can
+// give each worker its own connection. A replacement request keeps the
+// worker of the request it replaces.
+func TestDownloadAndUploadTagTheirWorkers(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Write(make([]byte, 64<<10))
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+
+	s := &Server{Server: ts.URL, DownloadURL: "/", UploadURL: "/"}
+	const requests = 3
+	for name, run := range map[string]func() error{
+		"download": func() error {
+			_, _, err := s.Download(true, false, false, requests, 1, 500*time.Millisecond)
+			return err
+		},
+		"upload": func() error {
+			_, _, err := s.Upload(false, true, false, false, requests, 64, 500*time.Millisecond)
+			return err
+		},
+	} {
+		rec := &workerRecorder{workers: map[int]bool{}}
+		http.DefaultClient.Transport = rec
+		if err := run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(rec.workers) != requests {
+			t.Errorf("%s: requests tagged with workers %v, want 0 to %d", name, rec.workers, requests-1)
+		}
 	}
 }

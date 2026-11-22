@@ -402,14 +402,15 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	downloadDone := make(chan struct{}, requests)
+	// each finished request hands its worker back for a replacement
+	downloadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
 
-	doDownload := func() {
+	doDownload := func(worker int) {
 		defer wg.Done()
 
-		reqClone := req.Clone(ctx)
+		reqClone := req.Clone(WithWorker(ctx, worker))
 		resp, err := http.DefaultClient.Do(reqClone)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -428,14 +429,14 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		// let the main loop start a replacement request, but never block on it
 		// once the test is over, otherwise this goroutine is leaked
 		select {
-		case downloadDone <- struct{}{}:
+		case downloadDone <- worker:
 		case <-ctx.Done():
 		}
 	}
 
-	spawnDownload := func() {
+	spawnDownload := func(worker int) {
 		wg.Add(1)
-		go doDownload()
+		go doDownload(worker)
 	}
 
 	counter.Start()
@@ -465,7 +466,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	}
 
 	for i := 0; i < requests; i++ {
-		spawnDownload()
+		spawnDownload(i)
 		time.Sleep(200 * time.Millisecond)
 	}
 
@@ -480,8 +481,8 @@ Loop:
 		case <-timeout:
 			cancel()
 			break Loop
-		case <-downloadDone:
-			spawnDownload()
+		case worker := <-downloadDone:
+			spawnDownload(worker)
 		}
 	}
 
@@ -521,7 +522,8 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	defer cancel()
 	u.Path = path.Join(u.Path, s.UploadURL)
 
-	uploadDone := make(chan struct{}, requests)
+	// each finished request hands its worker back for a replacement
+	uploadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
 	// the last error of a failed request, returned when no request got an
@@ -529,7 +531,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	var lastErr atomic.Pointer[error]
 	var answered atomic.Bool
 
-	doUpload := func() {
+	doUpload := func(worker int) {
 		defer wg.Done()
 
 		var bodyReader io.Reader
@@ -540,7 +542,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		}
 		countingReader := io.TeeReader(bodyReader, counter)
 
-		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), countingReader)
+		uploadReq, err := http.NewRequestWithContext(WithWorker(ctx, worker), http.MethodPost, u.String(), countingReader)
 		if err != nil {
 			output.WriteDebug("Failed when creating HTTP request: %s\n", err)
 			return
@@ -583,7 +585,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 				return
 			}
 			select {
-			case uploadDone <- struct{}{}:
+			case uploadDone <- worker:
 			case <-ctx.Done():
 			}
 			return
@@ -601,14 +603,14 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		// let the main loop start a replacement request, but never block on it
 		// once the test is over, otherwise this goroutine is leaked
 		select {
-		case uploadDone <- struct{}{}:
+		case uploadDone <- worker:
 		case <-ctx.Done():
 		}
 	}
 
-	spawnUpload := func() {
+	spawnUpload := func(worker int) {
 		wg.Add(1)
-		go doUpload()
+		go doUpload(worker)
 	}
 
 	counter.Start()
@@ -638,7 +640,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	}
 
 	for i := 0; i < requests; i++ {
-		spawnUpload()
+		spawnUpload(i)
 		time.Sleep(200 * time.Millisecond)
 	}
 
@@ -653,8 +655,8 @@ Loop:
 		case <-timeout:
 			cancel()
 			break Loop
-		case <-uploadDone:
-			spawnUpload()
+		case worker := <-uploadDone:
+			spawnUpload(worker)
 		}
 	}
 
