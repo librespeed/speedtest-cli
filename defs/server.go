@@ -524,9 +524,10 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	uploadDone := make(chan struct{}, requests)
 
 	var wg sync.WaitGroup
-	// the last error of a failed request; returned if nothing was uploaded,
-	// so a broken path is not reported as a 0 Mbps result
+	// the last error of a failed request, returned when no request got an
+	// answer, so a broken path is not reported as a 0 Mbps result
 	var lastErr atomic.Pointer[error]
+	var answered atomic.Bool
 
 	doUpload := func() {
 		defer wg.Done()
@@ -537,8 +538,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		} else {
 			bodyReader = bytes.NewReader(counter.Payload())
 		}
-		reqCounter := &requestCounter{shared: counter}
-		countingReader := io.TeeReader(bodyReader, reqCounter)
+		countingReader := io.TeeReader(bodyReader, counter)
 
 		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), countingReader)
 		if err != nil {
@@ -571,11 +571,12 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 			output.WriteDebug("Failed when making HTTP request: %s\n", err)
 			lastErr.Store(&err)
 			// The body cannot be replayed, so the transport does not retry
-			// it. Take back its bytes and let the main loop start a new
-			// request instead, after a pause so a refused connection does
-			// not spin. In auto mode a failed HTTP/3 request has already
-			// moved the server to TCP, so the new request goes over TCP.
-			counter.Discount(reqCounter.n.Load())
+			// it. Let the main loop start a new request instead, after a
+			// pause so a refused connection does not spin. In auto mode a
+			// failed HTTP/3 request has already moved the server to TCP, so
+			// the new request goes over TCP. The bytes this one sent stay
+			// counted: with --no-pre-allocate the body never ends, every
+			// request ends at --timeout, and the server got all of them.
 			select {
 			case <-time.After(uploadRetryDelay):
 			case <-ctx.Done():
@@ -588,6 +589,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 			return
 		}
 		defer resp.Body.Close()
+		answered.Store(true)
 
 		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 			// cancellation is how the test ends, so it is not a failure
@@ -660,10 +662,18 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
-	if err := lastErr.Load(); err != nil && counter.Total() == 0 {
+	// A request that ran into the client timeout was still sending, as with
+	// --no-pre-allocate where the body never ends, so its bytes count as a
+	// result. Any other failure with no answer at all is a broken path.
+	if err := lastErr.Load(); err != nil && !answered.Load() && !isTimeout(*err) {
 		return 0, 0, *err
 	}
 	return counter.AvgMbps(), counter.Total(), nil
+}
+
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // uploadRetryDelay spaces the retries of failed upload requests.

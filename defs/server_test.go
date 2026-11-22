@@ -259,14 +259,27 @@ func TestUploadFailsWhenNothingIsUploaded(t *testing.T) {
 	}
 }
 
-// The bytes of a failed request are taken back, and only those.
-func TestBytesCounterDiscount(t *testing.T) {
-	c := NewCounter()
-	c.Write(make([]byte, 100))
-	r := &requestCounter{shared: c}
-	r.Write(make([]byte, 30))
-	c.Discount(r.n.Load())
-	if got := c.Total(); got != 100 {
-		t.Fatalf("total %d after discounting a failed request, want 100", got)
+// TestUploadCountsRequestsThatTimeOut: with --no-pre-allocate the body never
+// ends, so every request ends at the client timeout. The server still got
+// what was sent, and the result must count it.
+func TestUploadCountsRequestsThatTimeOut(t *testing.T) {
+	var received atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		received.Add(n)
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old time.Duration) { http.DefaultClient.Timeout = old }(http.DefaultClient.Timeout)
+	http.DefaultClient.Timeout = 300 * time.Millisecond
+
+	s := &Server{Server: ts.URL, UploadURL: "/"}
+	_, total, err := s.Upload(true, true, false, false, 1, 64, 1500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	// let the server finish counting the last request
+	time.Sleep(100 * time.Millisecond)
+	if got := received.Load(); total < uint64(got)/2 {
+		t.Fatalf("reported %d bytes while the server received %d", total, got)
 	}
 }
