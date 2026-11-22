@@ -333,3 +333,50 @@ func TestDownloadAndUploadTagTheirWorkers(t *testing.T) {
 		}
 	}
 }
+
+// readSizeRecorder records the largest read made on the bodies it returns.
+type readSizeRecorder struct{ max atomic.Int64 }
+
+func (r *readSizeRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err == nil {
+		resp.Body = recordingBody{resp.Body, r}
+	}
+	return resp, err
+}
+
+type recordingBody struct {
+	io.ReadCloser
+	r *readSizeRecorder
+}
+
+func (b recordingBody) Read(p []byte) (int, error) {
+	for n := int64(len(p)); ; {
+		old := b.r.max.Load()
+		if n <= old || b.r.max.CompareAndSwap(old, n) {
+			break
+		}
+	}
+	return b.ReadCloser.Read(p)
+}
+
+// Download reads the body in large chunks: Go's HTTP/2 client sends a
+// WINDOW_UPDATE frame after every read that frees 4 KiB, so the 8 KiB reads
+// of io.Copy into io.Discard cost one write for every 8 KiB downloaded.
+func TestDownloadReadsInLargeChunks(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 1<<20))
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+	rec := &readSizeRecorder{}
+	http.DefaultClient.Transport = rec
+
+	s := &Server{Server: ts.URL, DownloadURL: "/"}
+	if _, _, err := s.Download(true, false, false, 1, 1, 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.max.Load(); got < downloadReadSize {
+		t.Fatalf("largest read asked for %d bytes, want %d", got, downloadReadSize)
+	}
+}

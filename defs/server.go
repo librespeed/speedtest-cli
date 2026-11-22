@@ -407,6 +407,13 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 
 	var wg sync.WaitGroup
 
+	// one read buffer per worker, reused by its replacement requests: only
+	// one request per worker runs at a time
+	bufs := make([][]byte, requests)
+	for i := range bufs {
+		bufs[i] = make([]byte, downloadReadSize)
+	}
+
 	doDownload := func(worker int) {
 		defer wg.Done()
 
@@ -420,7 +427,11 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		}
 		defer resp.Body.Close()
 
-		if _, err = io.Copy(io.Discard, io.TeeReader(resp.Body, counter)); err != nil {
+		// io.Copy into io.Discard would read in 8 KiB chunks (its ReadFrom),
+		// and Go's HTTP/2 client sends a WINDOW_UPDATE frame, in its own
+		// write, after every read that frees 4 KiB. Hiding ReadFrom makes
+		// CopyBuffer read into the larger buffer instead.
+		if _, err = io.CopyBuffer(struct{ io.Writer }{io.Discard}, io.TeeReader(resp.Body, counter), bufs[worker]); err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
 			}
@@ -677,6 +688,12 @@ func isTimeout(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
+
+// downloadReadSize is how much each download read asks for. On loopback,
+// where the CPU is the limit, HTTP/2 downloads got faster up to 128-256 KiB
+// and no faster beyond. It stays well below the 4 MiB stream window of Go's
+// HTTP/2 client, so the server is never left waiting for window.
+const downloadReadSize = 256 << 10
 
 // uploadRetryDelay spaces the retries of failed upload requests.
 const uploadRetryDelay = 200 * time.Millisecond
