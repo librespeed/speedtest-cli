@@ -228,13 +228,13 @@ func SpeedTest(c *cli.Context) error {
 	if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
 		caCert, err := os.ReadFile(caCertFileName)
 		if err != nil {
-			output.Fatal(err)
+			return err
 		}
 		caCertPool := x509.NewCertPool()
 		// An empty pool would fail every HTTPS request for an unknown
 		// authority, unless verification is off and the pool is not used.
 		if !caCertPool.AppendCertsFromPEM(caCert) && !c.Bool(defs.OptionSkipCertVerify) {
-			return fmt.Errorf("no certificate found in %s", caCertFileName)
+			return fmt.Errorf("no usable PEM certificate found in %s", caCertFileName)
 		}
 
 		transport.TLSClientConfig = &tls.Config{

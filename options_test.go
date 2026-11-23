@@ -70,25 +70,64 @@ func TestUploadSizeOutOfRangeIsRejected(t *testing.T) {
 func TestCACertFileWithoutACertificateIsRejected(t *testing.T) {
 	backend := mockBackend(t)
 	list := writeServerList(t, listedServer{1, "Up", backend.URL, "empty.php"})
+	args := []string{"--local-json", list, "--server", "1", "--duration", "1", "--no-icmp", "--no-download", "--no-upload", "--json"}
 
-	bundle := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(bundle, []byte("not a certificate\n"), 0o644); err != nil {
-		t.Fatalf("write the bundle: %v", err)
+	for name, content := range map[string]string{
+		"empty":            "",
+		"plain text":       "not a certificate\n",
+		"another PEM type": "-----BEGIN PUBLIC KEY-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END PUBLIC KEY-----\n",
+		"a broken block":   "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bundle := filepath.Join(t.TempDir(), "ca.pem")
+			if err := os.WriteFile(bundle, []byte(content), 0o644); err != nil {
+				t.Fatalf("write the bundle: %v", err)
+			}
+			r := runCLI(t, append(args, "--ca-cert", bundle)...)
+
+			if r.code != 1 {
+				t.Errorf("exit status %d, want 1, stderr:\n%s", r.code, r.stderr)
+			}
+			if msg, want := r.failure(t), "no usable PEM certificate found in "+bundle; msg != want {
+				t.Errorf("error = %q, want %q", msg, want)
+			}
+
+			// with verification off the trust store is not used, and
+			// neither is what the file holds
+			if r := runCLI(t, append(args, "--ca-cert", bundle, "--skip-cert-verify")...); r.code != 0 {
+				t.Errorf("with --skip-cert-verify: exit status %d, want 0, stderr:\n%s", r.code, r.stderr)
+			}
+		})
 	}
+}
 
-	args := []string{"--local-json", list, "--server", "1", "--duration", "1", "--no-icmp", "--no-download", "--no-upload", "--json", "--ca-cert", bundle}
-	r := runCLI(t, args...)
+// A --ca-cert file that cannot be read ends the run like any other error,
+// with the reason, whether the certificates are verified or not.
+func TestCACertFileThatCannotBeReadIsReported(t *testing.T) {
+	backend := mockBackend(t)
+	list := writeServerList(t, listedServer{1, "Up", backend.URL, "empty.php"})
+	args := []string{"--local-json", list, "--server", "1", "--duration", "1", "--no-icmp", "--no-download", "--no-upload", "--json"}
 
-	if r.code != 1 {
-		t.Errorf("exit status %d, want 1, stderr:\n%s", r.code, r.stderr)
-	}
-	if msg, want := r.failure(t), "no certificate found in "+bundle; msg != want {
-		t.Errorf("error = %q, want %q", msg, want)
-	}
+	dir := t.TempDir()
+	for name, path := range map[string]string{
+		"missing":     filepath.Join(dir, "missing.pem"),
+		"a directory": dir,
+	} {
+		for mode, verify := range map[string][]string{"verified": nil, "not verified": {"--skip-cert-verify"}} {
+			t.Run(name+", "+mode, func(t *testing.T) {
+				r := runCLI(t, append(append(args, "--ca-cert", path), verify...)...)
 
-	// with verification off the trust store is not used, and neither is the file
-	if r := runCLI(t, append(args, "--skip-cert-verify")...); r.code != 0 {
-		t.Errorf("with --skip-cert-verify: exit status %d, want 0, stderr:\n%s", r.code, r.stderr)
+				if r.code != 1 {
+					t.Errorf("exit status %d, want 1, stderr:\n%s", r.code, r.stderr)
+				}
+				if r.stdout != "" {
+					t.Errorf("stdout = %q, want no report", r.stdout)
+				}
+				if msg := r.failure(t); !strings.Contains(msg, path) {
+					t.Errorf("error = %q, want it to name %s", msg, path)
+				}
+			})
+		}
 	}
 }
 
