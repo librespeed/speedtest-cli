@@ -56,6 +56,12 @@ func TestUploadSizeOutOfRangeIsRejected(t *testing.T) {
 			t.Errorf("with %s: exit status %d, want 0, stderr:\n%s", unused, r.code, r.stderr)
 		}
 	}
+
+	// and neither does one that only lists the servers
+	r = runCLI(t, "--local-json", list, "--list", "--upload-size", "0")
+	if r.code != 0 || !strings.Contains(r.stdout, "1: Up") {
+		t.Errorf("with --list: exit status %d and stdout %q, want 0 and the server listed, stderr:\n%s", r.code, r.stdout, r.stderr)
+	}
 }
 
 // A --ca-cert file with no certificate in it leaves nothing to trust. Say so

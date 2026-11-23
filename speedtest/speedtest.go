@@ -188,8 +188,9 @@ func SpeedTest(c *cli.Context) error {
 	}
 
 	// The upload payload is allocated in one piece of that many KiB. The
-	// size is not used where there is no upload, or no payload to allocate.
-	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) {
+	// size is not used where there is no upload or no payload to allocate,
+	// and neither where the run only lists the servers.
+	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) && !c.Bool(defs.OptionList) {
 		switch {
 		case size < 1:
 			output.WriteError("Upload size cannot be lower than 1 KiB: %d is given\n", size)
