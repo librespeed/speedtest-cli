@@ -21,6 +21,13 @@ func TestContradictoryOptionsAreRejected(t *testing.T) {
 		{[]string{"--simple", "--json"}, "incompatible options 'simple' and 'json'"},
 		{[]string{"--simple", "--csv"}, "incompatible options 'simple' and 'csv'"},
 		{[]string{"--simple", "--json-stream"}, "incompatible options 'simple' and 'json-stream'"},
+		// the short forms name the same options
+		{[]string{"-4", "-6"}, "incompatible options 'ipv4' and 'ipv6'"},
+		// of several pairs one is named
+		{[]string{"--ipv4", "--ipv6", "--secure", "--insecure"}, "incompatible options 'ipv4' and 'ipv6'"},
+		// these two were rejected before, in the same words
+		{[]string{"--json-stream", "--json"}, "incompatible options 'json-stream' and 'json'"},
+		{[]string{"--json-stream", "--csv"}, "incompatible options 'json-stream' and 'csv'"},
 	}
 	for _, c := range cases {
 		t.Run(strings.Join(c.options, " "), func(t *testing.T) {

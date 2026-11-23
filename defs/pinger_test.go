@@ -42,13 +42,16 @@ func TestNewPingerResolvesWithinTheRequestedFamily(t *testing.T) {
 
 // The family was ignored for a name with addresses in both: the name was
 // resolved before the family was set. localhost is such a name on most
-// systems. Where it has no address in a family, there is nothing to tell
-// apart, and that family is skipped.
+// systems. Where it has no address in a family, the pinger must say so and
+// not hand out the address of the other family, as it did.
 func TestNewPingerResolvesANameWithinTheRequestedFamily(t *testing.T) {
 	for _, network := range []string{"ip4", "ip6"} {
 		t.Run(network, func(t *testing.T) {
 			if _, err := net.ResolveIPAddr(network, "localhost"); err != nil {
-				t.Skipf("localhost has no %s address here: %v", network, err)
+				if p, err := newPinger("localhost", network); err == nil {
+					t.Errorf("resolved to %v over %s, where localhost has no such address", p.IPAddr(), network)
+				}
+				return
 			}
 
 			p, err := newPinger("localhost", network)

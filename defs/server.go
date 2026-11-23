@@ -227,9 +227,10 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	return rttMillis(stats.AvgRtt), jitter, nil
 }
 
-// newPinger returns a pinger for host, resolved within network ("ip", "ip4"
-// or "ip6"). The network is set before resolving: probing.NewPinger resolves
-// at once with "ip", and a pinger that has an address does not resolve again.
+// newPinger returns a pinger for host, resolved within network: "ip4" or
+// "ip6" for that family, and anything else for either. The network is set
+// before resolving: probing.NewPinger resolves at once with "ip", and a
+// pinger that has an address does not resolve again.
 func newPinger(host, network string) (*probing.Pinger, error) {
 	p := probing.New(host)
 	p.SetNetwork(network)

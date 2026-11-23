@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/pem"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +34,20 @@ func TestUploadSizeOutOfRangeIsRejected(t *testing.T) {
 				t.Errorf("error = %q, want %q", msg, want)
 			}
 		})
+	}
+
+	// The largest size passes. Its server takes the connection and never
+	// answers, so the run ends at the probe and does not get to an upload
+	// of 2 GiB. The listener stays open, so nothing else can get its port.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	silent := writeServerList(t, listedServer{1, "Silent", "http://" + ln.Addr().String(), "empty.php"})
+	r := runCLI(t, "--local-json", silent, "--server", "1", "--duration", "1", "--timeout", "1", "--no-icmp", "--no-download", "--json", "--upload-size", "2097151")
+	if msg := r.failure(t); r.code != 1 || !strings.Contains(msg, "is not responding") {
+		t.Errorf("with the largest size: exit status %d and error %q, want 1 and the silent server reported", r.code, msg)
 	}
 
 	// a run that does not upload, or allocates no payload, does not care
@@ -65,5 +83,35 @@ func TestCACertFileWithoutACertificateIsRejected(t *testing.T) {
 	// with verification off the trust store is not used, and neither is the file
 	if r := runCLI(t, append(args, "--skip-cert-verify")...); r.code != 0 {
 		t.Errorf("with --skip-cert-verify: exit status %d, want 0, stderr:\n%s", r.code, r.stderr)
+	}
+}
+
+// A file with a certificate in it is the trust store, whatever else it
+// holds: a block that is no certificate next to it does not get the file
+// refused, and the run trusts the server the certificate is for.
+func TestCACertFileWithACertificateIsUsed(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/getIP.php" {
+			w.Write([]byte(`{"processedString":"127.0.0.1 - localhost","rawIspInfo":""}`))
+		}
+	}))
+	t.Cleanup(ts.Close)
+	list := writeServerList(t, listedServer{1, "Up", ts.URL, "empty.php"})
+
+	notACertificate := "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n"
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ts.Certificate().Raw})
+	bundle := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(bundle, append([]byte(notACertificate), certificate...), 0o644); err != nil {
+		t.Fatalf("write the bundle: %v", err)
+	}
+
+	args := []string{"--local-json", list, "--server", "1", "--duration", "1", "--no-icmp", "--no-download", "--no-upload", "--json"}
+
+	// without the file the server's certificate comes from an unknown authority
+	if r := runCLI(t, args...); r.code != 1 || !strings.Contains(r.failure(t), "certificate") {
+		t.Errorf("without --ca-cert: exit status %d, want 1 for the certificate, stderr:\n%s", r.code, r.stderr)
+	}
+	if r := runCLI(t, append(args, "--ca-cert", bundle)...); r.code != 0 {
+		t.Errorf("with --ca-cert: exit status %d, want 0, stderr:\n%s", r.code, r.stderr)
 	}
 }
