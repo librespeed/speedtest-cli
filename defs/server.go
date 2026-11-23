@@ -509,13 +509,13 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 	counter := NewCounter()
 	counter.SetMebi(useMebi)
-	counter.SetUploadSize(uploadSize)
 
 	if noPrealloc {
 		output.WriteUI("Pre-allocation is disabled, performance might be lower!\n")
 	} else {
-		// each request reads from this shared payload; without it they stream
-		// straight from crypto/rand instead
+		// Each request reads from this shared payload. Without it they
+		// stream straight from crypto/rand instead, and the size is not used.
+		counter.SetUploadSize(uploadSize)
 		counter.GenerateBlob()
 	}
 
