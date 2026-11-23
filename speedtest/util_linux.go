@@ -19,7 +19,8 @@ func newDialerInterfaceOrFwmarkBound(iface string, fwmark int) (dialer *net.Dial
 				errSock = unix.BindToDevice(int(fd), iface)
 			}
 
-			if fwmark > 0 {
+			// a mark that could be set must not hide a binding that failed
+			if fwmark > 0 && errSock == nil {
 				errSock = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, fwmark)
 			}
 		}))

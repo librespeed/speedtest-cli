@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,12 @@ const (
 	defaultTelemetryServer = "https://librespeed.org"
 	defaultTelemetryPath   = "/results/telemetry.php"
 	defaultTelemetryShare  = "/results/"
+
+	// maxUploadSize is the largest --upload-size, in KiB: the most whose
+	// byte count fits an int on a 32-bit system, just under 2 GiB. The same
+	// limit holds everywhere, so an option value works on one system if it
+	// works on another.
+	maxUploadSize = math.MaxInt32 / 1024
 
 	forceNothing = 0
 	forceHttps   = 1
@@ -180,6 +187,19 @@ func SpeedTest(c *cli.Context) error {
 		return errors.New("invalid concurrent requests setting")
 	}
 
+	// The upload payload is allocated in one piece of that many KiB. The
+	// size is not used where there is no upload, or no payload to allocate.
+	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) {
+		switch {
+		case size < 1:
+			output.WriteError("Upload size cannot be lower than 1 KiB: %d is given\n", size)
+			return errors.New("invalid upload size setting")
+		case size > maxUploadSize:
+			output.WriteError("Upload size cannot be more than %d KiB: %d is given\n", maxUploadSize, size)
+			return errors.New("invalid upload size setting")
+		}
+	}
+
 	noICMP := c.Bool(defs.OptionNoICMP)
 
 	// HTTP requests timeout
@@ -210,7 +230,11 @@ func SpeedTest(c *cli.Context) error {
 			output.Fatal(err)
 		}
 		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
+		// An empty pool would fail every HTTPS request for an unknown
+		// authority, unless verification is off and the pool is not used.
+		if !caCertPool.AppendCertsFromPEM(caCert) && !c.Bool(defs.OptionSkipCertVerify) {
+			return fmt.Errorf("no certificate found in %s", caCertFileName)
+		}
 
 		transport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: c.Bool(defs.OptionSkipCertVerify),
@@ -241,7 +265,7 @@ func SpeedTest(c *cli.Context) error {
 
 	if iface != "" || fwmark > 0 {
 		var err error
-		dialer, err = newDialerInterfaceOrFwmarkBound(iface, fwmark)
+		dialer, err = boundDialer(dialer, iface, fwmark)
 		if err != nil {
 			return err
 		}
@@ -337,9 +361,6 @@ func SpeedTest(c *cli.Context) error {
 		var wg sync.WaitGroup
 		jobs := make(chan PingJob, len(servers))
 		results := make(chan PingResult, len(servers))
-		done := make(chan struct{})
-
-		pingList := make(map[int]float64)
 
 		// spawn 10 concurrent pingers
 		for i := 0; i < 10; i++ {
@@ -353,20 +374,7 @@ func SpeedTest(c *cli.Context) error {
 		}
 		close(jobs)
 
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-	Loop:
-		for {
-			select {
-			case result := <-results:
-				pingList[result.Index] = result.Ping
-			case <-done:
-				break Loop
-			}
-		}
+		pingList := collectPings(results, &wg)
 
 		if len(pingList) == 0 {
 			output.Fatal("No server is currently available, please try again later.")
@@ -389,6 +397,22 @@ func SpeedTest(c *cli.Context) error {
 		// do speed test on the server
 		return doSpeedTest(c, []defs.Server{servers[serverIdx]}, telemetryServer, network, silent, noICMP)
 	}
+}
+
+// collectPings gathers the ping of every server that answered. It reads the
+// results until the workers are done and the channel is closed, so a result
+// that is still in the channel when the last worker finishes is not lost.
+func collectPings(results chan PingResult, wg *sync.WaitGroup) map[int]float64 {
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	pingList := make(map[int]float64)
+	for result := range results {
+		pingList[result.Index] = result.Ping
+	}
+	return pingList
 }
 
 func pingWorker(jobs <-chan PingJob, results chan<- PingResult, wg *sync.WaitGroup, srcIp, network string, noICMP bool) {
@@ -566,6 +590,18 @@ func contains(arr []int, val int) bool {
 		}
 	}
 	return false
+}
+
+// boundDialer returns a dialer bound to iface and marked with fwmark. It
+// keeps the source address of the dialer given: --source can be combined
+// with --fwmark.
+func boundDialer(dialer *net.Dialer, iface string, fwmark int) (*net.Dialer, error) {
+	bound, err := newDialerInterfaceOrFwmarkBound(iface, fwmark)
+	if err != nil {
+		return nil, err
+	}
+	bound.LocalAddr = dialer.LocalAddr
+	return bound, nil
 }
 
 func newDialerAddressBound(src string, network string) (dialer *net.Dialer, err error) {
