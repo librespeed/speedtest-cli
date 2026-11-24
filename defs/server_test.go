@@ -260,6 +260,43 @@ func TestUploadFailsWhenNothingIsUploaded(t *testing.T) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// A request still in flight when the test ends must not turn into a result of
+// 0 Mbps: nothing was answered, so there is no measurement to report.
+func TestUploadFailsWhenNoRequestIsAnswered(t *testing.T) {
+	// the transport blocks until the request's context ends, so not a byte of
+	// the body is sent and no answer arrives
+	blocking := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+	http.DefaultClient.Transport = blocking
+
+	s := &Server{Server: "http://127.0.0.1:1", UploadURL: "/"}
+	rate, total, err := s.Upload(false, true, false, false, 1, 64, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Upload reported %.2f Mbps over %d bytes while no request was answered", rate, total)
+	}
+}
+
+// Download has the same hole and reports it the same way.
+func TestDownloadFailsWhenNoRequestIsAnswered(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+
+	s := &Server{Server: ts.URL, DownloadURL: "/"}
+	rate, total, err := s.Download(true, false, false, 1, 1, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Download reported %.2f Mbps over %d bytes while no request was answered", rate, total)
+	}
+}
+
 // TestUploadCountsRequestsThatTimeOut: with --no-pre-allocate the body never
 // ends, so every request ends at the client timeout. The server still got
 // what was sent, and the result must count it.

@@ -406,6 +406,10 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	downloadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
+	// the last error of a failed request, returned when no request got an
+	// answer, so a broken path is not reported as a 0 Mbps result
+	var lastErr atomic.Pointer[error]
+	var succeeded atomic.Bool
 
 	// one read buffer per worker, reused by its replacement requests: only
 	// one request per worker runs at a time
@@ -423,9 +427,13 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				output.WriteDebug("Failed when making HTTP request: %s\n", err)
 			}
+			if ctx.Err() == nil {
+				lastErr.Store(&err)
+			}
 			return
 		}
 		defer resp.Body.Close()
+		succeeded.Store(true)
 
 		// io.Copy into io.Discard would read in 8 KiB chunks (its ReadFrom),
 		// and Go's HTTP/2 client sends a WINDOW_UPDATE frame, in its own
@@ -501,6 +509,15 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
+	// No request got a response: whatever went out is not a measurement of
+	// 0 Mbps, it is a broken path. A request that ran into the client
+	// timeout with a response in hand counts as a result.
+	if !succeeded.Load() {
+		if err := lastErr.Load(); err != nil {
+			return 0, 0, *err
+		}
+		return 0, 0, errors.New("no download request was answered before the test ended")
+	}
 	return counter.AvgMbps(), counter.Total(), nil
 }
 
@@ -677,7 +694,13 @@ Loop:
 
 	// A request that ran into the client timeout was still sending, as with
 	// --no-pre-allocate where the body never ends, so its bytes count as a
-	// result. Any other failure with no answer at all is a broken path.
+	// result. Nothing answered and nothing was sent is not a result of 0 Mbps.
+	if !answered.Load() && counter.Total() == 0 {
+		if err := lastErr.Load(); err != nil {
+			return 0, 0, *err
+		}
+		return 0, 0, errors.New("no upload request was answered before the test ended")
+	}
 	if err := lastErr.Load(); err != nil && !answered.Load() && !isTimeout(*err) {
 		return 0, 0, *err
 	}
