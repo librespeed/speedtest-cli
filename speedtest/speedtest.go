@@ -188,8 +188,9 @@ func SpeedTest(c *cli.Context) error {
 	}
 
 	// The upload payload is allocated in one piece of that many KiB. The
-	// size is not used where there is no upload, or no payload to allocate.
-	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) {
+	// size is not used where there is no upload or no payload to allocate,
+	// and neither where the run only lists the servers.
+	if size := c.Int(defs.OptionUploadSize); !c.Bool(defs.OptionNoUpload) && !c.Bool(defs.OptionNoPreAllocate) && !c.Bool(defs.OptionList) {
 		switch {
 		case size < 1:
 			output.WriteError("Upload size cannot be lower than 1 KiB: %d is given\n", size)
@@ -227,13 +228,13 @@ func SpeedTest(c *cli.Context) error {
 	if caCertFileName := c.String(defs.OptionCACert); caCertFileName != "" {
 		caCert, err := os.ReadFile(caCertFileName)
 		if err != nil {
-			output.Fatal(err)
+			return err
 		}
 		caCertPool := x509.NewCertPool()
 		// An empty pool would fail every HTTPS request for an unknown
 		// authority, unless verification is off and the pool is not used.
 		if !caCertPool.AppendCertsFromPEM(caCert) && !c.Bool(defs.OptionSkipCertVerify) {
-			return fmt.Errorf("no certificate found in %s", caCertFileName)
+			return fmt.Errorf("no usable PEM certificate found in %s", caCertFileName)
 		}
 
 		transport.TLSClientConfig = &tls.Config{

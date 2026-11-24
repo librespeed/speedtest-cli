@@ -227,9 +227,10 @@ func (s *Server) ICMPPingAndJitter(count int, srcIp, network string) (float64, f
 	return rttMillis(stats.AvgRtt), jitter, nil
 }
 
-// newPinger returns a pinger for host, resolved within network ("ip", "ip4"
-// or "ip6"). The network is set before resolving: probing.NewPinger resolves
-// at once with "ip", and a pinger that has an address does not resolve again.
+// newPinger returns a pinger for host, resolved within network: "ip4" or
+// "ip6" for that family, and anything else for either. The network is set
+// before resolving: probing.NewPinger resolves at once with "ip", and a
+// pinger that has an address does not resolve again.
 func newPinger(host, network string) (*probing.Pinger, error) {
 	p := probing.New(host)
 	p.SetNetwork(network)
@@ -508,13 +509,13 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 	counter := NewCounter()
 	counter.SetMebi(useMebi)
-	counter.SetUploadSize(uploadSize)
 
 	if noPrealloc {
 		output.WriteUI("Pre-allocation is disabled, performance might be lower!\n")
 	} else {
-		// each request reads from this shared payload; without it they stream
-		// straight from crypto/rand instead
+		// Each request reads from this shared payload. Without it they
+		// stream straight from crypto/rand instead, and the size is not used.
+		counter.SetUploadSize(uploadSize)
 		counter.GenerateBlob()
 	}
 
