@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -45,6 +46,7 @@ type Server struct {
 	// plain HTTP. Filled by CheckUp (and IsUp, which wraps it), which runs
 	// before every measurement.
 	NegotiatedTLS *TLSInfo `json:"-"`
+	Protocol      string   `json:"-"` // e.g. HTTP/3.0, filled by IsUp too
 }
 
 // TLSInfo names the negotiated TLS parameters of a connection.
@@ -89,6 +91,8 @@ func (s *Server) CheckUp() error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	s.Protocol = resp.Proto
 
 	// Report what the connection actually negotiated. On hardware without AES
 	// acceleration the cipher, not the link, is what bounds the result, and
@@ -313,7 +317,7 @@ func (s *Server) PingAndJitter(count int) (float64, float64, error) {
 	}
 
 	for _, addr := range remotes {
-		output.WriteDebug("Pinging %s over TCP (%s)\n", addr, addressFamily(addr))
+		output.WriteDebug("Pinging %s over %s (%s)\n", addr, s.Protocol, addressFamily(addr))
 	}
 
 	// discard first result due to handshake overhead
@@ -410,24 +414,44 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	downloadDone := make(chan struct{}, requests)
+	// each finished request hands its worker back for a replacement
+	downloadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
+	// the last error of a failed request, returned when no request got an
+	// answer, so a broken path is not reported as a 0 Mbps result
+	var lastErr atomic.Pointer[error]
+	var succeeded atomic.Bool
 
-	doDownload := func() {
+	// one read buffer per worker, reused by its replacement requests: only
+	// one request per worker runs at a time
+	bufs := make([][]byte, requests)
+	for i := range bufs {
+		bufs[i] = make([]byte, downloadReadSize)
+	}
+
+	doDownload := func(worker int) {
 		defer wg.Done()
 
-		reqClone := req.Clone(ctx)
+		reqClone := req.Clone(WithWorker(ctx, worker))
 		resp, err := http.DefaultClient.Do(reqClone)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				output.WriteDebug("Failed when making HTTP request: %s\n", err)
 			}
+			if ctx.Err() == nil {
+				lastErr.Store(&err)
+			}
 			return
 		}
 		defer resp.Body.Close()
+		succeeded.Store(true)
 
-		if _, err = io.Copy(io.Discard, io.TeeReader(resp.Body, counter)); err != nil {
+		// io.Copy into io.Discard would read in 8 KiB chunks (its ReadFrom),
+		// and Go's HTTP/2 client sends a WINDOW_UPDATE frame, in its own
+		// write, after every read that frees 4 KiB. Hiding ReadFrom makes
+		// CopyBuffer read into the larger buffer instead.
+		if _, err = io.CopyBuffer(struct{ io.Writer }{io.Discard}, io.TeeReader(resp.Body, counter), bufs[worker]); err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
 			}
@@ -436,14 +460,14 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		// let the main loop start a replacement request, but never block on it
 		// once the test is over, otherwise this goroutine is leaked
 		select {
-		case downloadDone <- struct{}{}:
+		case downloadDone <- worker:
 		case <-ctx.Done():
 		}
 	}
 
-	spawnDownload := func() {
+	spawnDownload := func(worker int) {
 		wg.Add(1)
-		go doDownload()
+		go doDownload(worker)
 	}
 
 	counter.Start()
@@ -473,7 +497,7 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	}
 
 	for i := 0; i < requests; i++ {
-		spawnDownload()
+		spawnDownload(i)
 		time.Sleep(200 * time.Millisecond)
 	}
 
@@ -488,8 +512,8 @@ Loop:
 		case <-timeout:
 			cancel()
 			break Loop
-		case <-downloadDone:
-			spawnDownload()
+		case worker := <-downloadDone:
+			spawnDownload(worker)
 		}
 	}
 
@@ -497,6 +521,15 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
+	// No request got a response: whatever went out is not a measurement of
+	// 0 Mbps, it is a broken path. A request that ran into the client
+	// timeout with a response in hand counts as a result.
+	if !succeeded.Load() {
+		if err := lastErr.Load(); err != nil {
+			return 0, 0, *err
+		}
+		return 0, 0, errors.New("no download request was answered before the test ended")
+	}
 	return counter.AvgMbps(), counter.Total(), nil
 }
 
@@ -529,11 +562,16 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	defer cancel()
 	u.Path = path.Join(u.Path, s.UploadURL)
 
-	uploadDone := make(chan struct{}, requests)
+	// each finished request hands its worker back for a replacement
+	uploadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
+	// the last error of a failed request, returned when no request got an
+	// answer, so a broken path is not reported as a 0 Mbps result
+	var lastErr atomic.Pointer[error]
+	var answered atomic.Bool
 
-	doUpload := func() {
+	doUpload := func(worker int) {
 		defer wg.Done()
 
 		var bodyReader io.Reader
@@ -544,7 +582,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		}
 		countingReader := io.TeeReader(bodyReader, counter)
 
-		uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), countingReader)
+		uploadReq, err := http.NewRequestWithContext(WithWorker(ctx, worker), http.MethodPost, u.String(), countingReader)
 		if err != nil {
 			output.WriteDebug("Failed when creating HTTP request: %s\n", err)
 			return
@@ -568,12 +606,32 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 
 		resp, err := http.DefaultClient.Do(uploadReq)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				output.WriteDebug("Failed when making HTTP request: %s\n", err)
+			if ctx.Err() != nil {
+				// cancellation is how the test ends, so it is not a failure
+				return
+			}
+			output.WriteDebug("Failed when making HTTP request: %s\n", err)
+			lastErr.Store(&err)
+			// The body cannot be replayed, so the transport does not retry
+			// it. Let the main loop start a new request instead, after a
+			// pause so a refused connection does not spin. In auto mode a
+			// failed HTTP/3 request has already moved the server to TCP, so
+			// the new request goes over TCP. The bytes this one sent stay
+			// counted: with --no-pre-allocate the body never ends, every
+			// request ends at --timeout, and the server got all of them.
+			select {
+			case <-time.After(uploadRetryDelay):
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case uploadDone <- worker:
+			case <-ctx.Done():
 			}
 			return
 		}
 		defer resp.Body.Close()
+		answered.Store(true)
 
 		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 			// cancellation is how the test ends, so it is not a failure
@@ -585,14 +643,14 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		// let the main loop start a replacement request, but never block on it
 		// once the test is over, otherwise this goroutine is leaked
 		select {
-		case uploadDone <- struct{}{}:
+		case uploadDone <- worker:
 		case <-ctx.Done():
 		}
 	}
 
-	spawnUpload := func() {
+	spawnUpload := func(worker int) {
 		wg.Add(1)
-		go doUpload()
+		go doUpload(worker)
 	}
 
 	counter.Start()
@@ -622,7 +680,7 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	}
 
 	for i := 0; i < requests; i++ {
-		spawnUpload()
+		spawnUpload(i)
 		time.Sleep(200 * time.Millisecond)
 	}
 
@@ -637,8 +695,8 @@ Loop:
 		case <-timeout:
 			cancel()
 			break Loop
-		case <-uploadDone:
-			spawnUpload()
+		case worker := <-uploadDone:
+			spawnUpload(worker)
 		}
 	}
 
@@ -646,8 +704,34 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
+	// A request that ran into the client timeout was still sending, as with
+	// --no-pre-allocate where the body never ends, so its bytes count as a
+	// result. Nothing answered and nothing was sent is not a result of 0 Mbps.
+	if !answered.Load() && counter.Total() == 0 {
+		if err := lastErr.Load(); err != nil {
+			return 0, 0, *err
+		}
+		return 0, 0, errors.New("no upload request was answered before the test ended")
+	}
+	if err := lastErr.Load(); err != nil && !answered.Load() && !isTimeout(*err) {
+		return 0, 0, *err
+	}
 	return counter.AvgMbps(), counter.Total(), nil
 }
+
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// downloadReadSize is how much each download read asks for. On loopback,
+// where the CPU is the limit, HTTP/2 downloads got faster up to 128-256 KiB
+// and no faster beyond. It stays well below the 4 MiB stream window of Go's
+// HTTP/2 client, so the server is never left waiting for window.
+const downloadReadSize = 256 << 10
+
+// uploadRetryDelay spaces the retries of failed upload requests.
+const uploadRetryDelay = 200 * time.Millisecond
 
 // GetIPInfo accesses the backend's getIP.php endpoint and get current client's IP information
 func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {

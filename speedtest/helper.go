@@ -2,6 +2,7 @@ package speedtest
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,14 @@ import (
 const (
 	// the default ping count for measuring ping and jitter
 	pingCount = 10
+)
+
+// activeTransport routes the test servers' requests; nil until SpeedTest
+// sets it up. telemetryClient sends results over TCP only, even when the
+// telemetry server is also a test server reached over HTTP/3.
+var (
+	activeTransport *protoTransport
+	telemetryClient = http.DefaultClient
 )
 
 // doSpeedTest is where the actual speed test happens
@@ -64,10 +73,11 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 		}
 
 		if upErr := currentServer.CheckUp(); upErr == nil {
+			output.WriteUI("Protocol: %s\n", currentServer.Protocol)
 			output.WriteDebug("Fetching IP info\n")
 			ispInfo, err := currentServer.GetIPInfo(c.String(defs.OptionDistance))
 			if err != nil {
-				output.WriteError("Failed to get IP info: %s\n", err)
+				output.WriteError("Failed to get IP info: %s\n", output.Sanitize(err.Error()))
 				return err
 			}
 			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
@@ -94,7 +104,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 			p, jitter, err := currentServer.ICMPPingAndJitter(pingCount, c.String(defs.OptionSource), network)
 			if err != nil {
-				output.WriteError("Failed to get ping and jitter: %s\n", err)
+				output.WriteError("Failed to get ping and jitter: %s\n", output.Sanitize(err.Error()))
 				return err
 			}
 
@@ -106,6 +116,12 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				// isn't when stderr is not a terminal
 				pb.Stop()
 				output.WriteUI("Ping: %.2f ms\tJitter: %.2f ms\n", p, jitter)
+			}
+
+			// report what the measurements ran over, which in auto mode can
+			// differ from what the probe above saw
+			if activeTransport != nil {
+				activeTransport.resetObserved(u.Host)
 			}
 
 			// get download value
@@ -121,7 +137,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get download speed: %s\n", err)
+					output.WriteError("Failed to get download speed: %s\n", output.Sanitize(err.Error()))
 					return err
 				}
 				downloadValue = download
@@ -143,13 +159,27 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get upload speed: %s\n", err)
+					output.WriteError("Failed to get upload speed: %s\n", output.Sanitize(err.Error()))
 					return err
 				}
 				uploadValue = upload
 				bytesWritten = bw
 
 				output.WriteDebug("Upload test finished in %s: %s, %d byte(s) sent\n", time.Since(uploadStart).Round(time.Millisecond), humanizeRate(upload, c), bw)
+			}
+
+			if activeTransport != nil {
+				if proto, state, ok := activeTransport.observedOn(u.Host); ok && proto != currentServer.Protocol {
+					output.WriteUI("Protocol used by the test: %s\n", proto)
+					currentServer.Protocol = proto
+					currentServer.NegotiatedTLS = nil
+					if state != nil {
+						currentServer.NegotiatedTLS = &defs.TLSInfo{
+							Version: tls.VersionName(state.Version),
+							Cipher:  tls.CipherSuiteName(state.CipherSuite),
+						}
+					}
+				}
 			}
 
 			// print result if --simple is given
@@ -170,7 +200,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				extra.Extra = c.String(defs.OptionTelemetryExtra)
 
 				if link, err := sendTelemetry(telemetryServer, ispInfo, downloadValue, uploadValue, p, jitter, currentServer.TLog.String(), extra); err != nil {
-					output.WriteError("Error when sending telemetry data: %s\n", err)
+					output.WriteError("Error when sending telemetry data: %s\n", output.Sanitize(err.Error()))
 				} else {
 					shareLink = link
 					// only print to stdout when --json and --csv are not used
@@ -217,6 +247,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Server.Name = currentServer.Name
 				rep.Server.URL = u.String()
 
+				rep.Protocol = currentServer.Protocol
 				if currentServer.NegotiatedTLS != nil {
 					rep.TLS = &report.TLSReport{
 						Version: currentServer.NegotiatedTLS.Version,
@@ -376,7 +407,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 	req.Header.Set("Content-Type", wr.FormDataContentType())
 	req.Header.Set("User-Agent", defs.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetryClient.Do(req)
 	if err != nil {
 		output.WriteDebug("Error when making HTTP request: %s\n", err)
 		return "", err
@@ -385,7 +416,7 @@ func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResu
 
 	id, err := io.ReadAll(resp.Body)
 	if err != nil {
-		output.WriteError("Error when reading HTTP request: %s\n", err)
+		output.WriteError("Error when reading HTTP request: %s\n", output.Sanitize(err.Error()))
 		return "", err
 	}
 

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -212,5 +213,207 @@ func TestUploadSendsContentLength(t *testing.T) {
 	}
 	if total <= payloadBytes {
 		t.Errorf("counter reported %d bytes, want more than one payload", total)
+	}
+}
+
+// flakyUploadServer drops the connection of the first `failures` POSTs
+// without answering, then answers every POST. It returns the server and the number
+// of body bytes it read from the answered POSTs.
+func flakyUploadServer(t *testing.T, failures int64) (*Server, *atomic.Int64) {
+	t.Helper()
+	var seen, answered atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if seen.Add(1) <= failures {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		n, _ := io.Copy(io.Discard, r.Body)
+		answered.Add(n)
+	}))
+	t.Cleanup(ts.Close)
+	return &Server{Server: ts.URL, UploadURL: "/"}, &answered
+}
+
+// A request that fails mid-test is retried instead of dropped: the body
+// cannot be replayed, so the transport does not retry it, and with a single
+// stream the run would otherwise upload nothing and report 0 Mbps.
+func TestUploadRetriesAFailedRequest(t *testing.T) {
+	s, answered := flakyUploadServer(t, 1)
+	_, total, err := s.Upload(false, true, false, false, 1, 64, time.Second)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if total == 0 || answered.Load() == 0 {
+		t.Fatalf("uploaded %d bytes, server read %d: the failed request was not retried", total, answered.Load())
+	}
+}
+
+// When every request fails there is no measurement, and Upload says so
+// instead of returning 0 Mbps as a result.
+func TestUploadFailsWhenNothingIsUploaded(t *testing.T) {
+	s, _ := flakyUploadServer(t, 1<<30)
+	if _, total, err := s.Upload(false, true, false, false, 1, 64, time.Second); err == nil {
+		t.Fatalf("Upload of %d bytes returned no error while every request failed", total)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// A request still in flight when the test ends must not turn into a result of
+// 0 Mbps: nothing was answered, so there is no measurement to report.
+func TestUploadFailsWhenNoRequestIsAnswered(t *testing.T) {
+	// the transport blocks until the request's context ends, so not a byte of
+	// the body is sent and no answer arrives
+	blocking := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+	http.DefaultClient.Transport = blocking
+
+	s := &Server{Server: "http://127.0.0.1:1", UploadURL: "/"}
+	rate, total, err := s.Upload(false, true, false, false, 1, 64, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Upload reported %.2f Mbps over %d bytes while no request was answered", rate, total)
+	}
+}
+
+// Download has the same hole and reports it the same way.
+func TestDownloadFailsWhenNoRequestIsAnswered(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+
+	s := &Server{Server: ts.URL, DownloadURL: "/"}
+	rate, total, err := s.Download(true, false, false, 1, 1, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Download reported %.2f Mbps over %d bytes while no request was answered", rate, total)
+	}
+}
+
+// TestUploadCountsRequestsThatTimeOut: with --no-pre-allocate the body never
+// ends, so every request ends at the client timeout. The server still got
+// what was sent, and the result must count it.
+func TestUploadCountsRequestsThatTimeOut(t *testing.T) {
+	var received atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		received.Add(n)
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old time.Duration) { http.DefaultClient.Timeout = old }(http.DefaultClient.Timeout)
+	http.DefaultClient.Timeout = 300 * time.Millisecond
+
+	s := &Server{Server: ts.URL, UploadURL: "/"}
+	_, total, err := s.Upload(true, true, false, false, 1, 64, 1500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	// let the server finish counting the last request
+	time.Sleep(100 * time.Millisecond)
+	if got := received.Load(); total < uint64(got)/2 {
+		t.Fatalf("reported %d bytes while the server received %d", total, got)
+	}
+}
+
+// workerRecorder records the worker each request was tagged with.
+type workerRecorder struct {
+	mu      sync.Mutex
+	workers map[int]bool
+}
+
+func (r *workerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	if w, ok := Worker(req.Context()); ok {
+		r.mu.Lock()
+		r.workers[w] = true
+		r.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// Download and Upload tag each request with its worker, so the transport can
+// give each worker its own connection. A replacement request keeps the
+// worker of the request it replaces.
+func TestDownloadAndUploadTagTheirWorkers(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Write(make([]byte, 64<<10))
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+
+	s := &Server{Server: ts.URL, DownloadURL: "/", UploadURL: "/"}
+	const requests = 3
+	for name, run := range map[string]func() error{
+		"download": func() error {
+			_, _, err := s.Download(true, false, false, requests, 1, 500*time.Millisecond)
+			return err
+		},
+		"upload": func() error {
+			_, _, err := s.Upload(false, true, false, false, requests, 64, 500*time.Millisecond)
+			return err
+		},
+	} {
+		rec := &workerRecorder{workers: map[int]bool{}}
+		http.DefaultClient.Transport = rec
+		if err := run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(rec.workers) != requests {
+			t.Errorf("%s: requests tagged with workers %v, want 0 to %d", name, rec.workers, requests-1)
+		}
+	}
+}
+
+// readSizeRecorder records the largest read made on the bodies it returns.
+type readSizeRecorder struct{ max atomic.Int64 }
+
+func (r *readSizeRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err == nil {
+		resp.Body = recordingBody{resp.Body, r}
+	}
+	return resp, err
+}
+
+type recordingBody struct {
+	io.ReadCloser
+	r *readSizeRecorder
+}
+
+func (b recordingBody) Read(p []byte) (int, error) {
+	for n := int64(len(p)); ; {
+		old := b.r.max.Load()
+		if n <= old || b.r.max.CompareAndSwap(old, n) {
+			break
+		}
+	}
+	return b.ReadCloser.Read(p)
+}
+
+// Download reads the body in large chunks: Go's HTTP/2 client sends a
+// WINDOW_UPDATE frame after every read that frees 4 KiB, so the 8 KiB reads
+// of io.Copy into io.Discard cost one write for every 8 KiB downloaded.
+func TestDownloadReadsInLargeChunks(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 1<<20))
+	}))
+	t.Cleanup(ts.Close)
+	defer func(old http.RoundTripper) { http.DefaultClient.Transport = old }(http.DefaultClient.Transport)
+	rec := &readSizeRecorder{}
+	http.DefaultClient.Transport = rec
+
+	s := &Server{Server: ts.URL, DownloadURL: "/"}
+	if _, _, err := s.Download(true, false, false, 1, 1, 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.max.Load(); got < downloadReadSize {
+		t.Fatalf("largest read asked for %d bytes, want %d", got, downloadReadSize)
 	}
 }
