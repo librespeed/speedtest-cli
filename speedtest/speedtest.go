@@ -363,6 +363,22 @@ func SpeedTest(c *cli.Context) error {
 		return nil
 	}
 
+	// From here on the requests go to the test servers and, with telemetry
+	// on, to its server. Under --secure a redirect may not take any of them
+	// from HTTPS to plain HTTP. A telemetry server given with http:// is
+	// still used as given, and the server list was fetched the way its own
+	// URL says, which --secure leaves alone.
+	if forceScheme == forceHttps {
+		// undone when the run ends, so that the policy does not stay on
+		// the client the whole process shares
+		defer func(old func(*http.Request, []*http.Request) error) {
+			http.DefaultClient.CheckRedirect = old
+		}(http.DefaultClient.CheckRedirect)
+		http.DefaultClient.CheckRedirect = refuseDowngrade
+		// telemetry has a client of its own, made for this run
+		telemetryClient.CheckRedirect = refuseDowngrade
+	}
+
 	// if --server is given, do speed tests with all of them
 	if len(c.IntSlice(defs.OptionServer)) > 0 {
 		return doSpeedTest(c, servers, telemetryServer, network, silent, noICMP)
@@ -471,6 +487,19 @@ func wellKnownServerURL(serverURL string) string {
 		return u.Scheme + "://" + u.Host + "/.well-known/librespeed"
 	}
 	return serverURL + "/.well-known/librespeed"
+}
+
+// refuseDowngrade is the redirect policy under --secure: a server asked over
+// HTTPS may not send the client on to plain HTTP. The limit of ten redirects
+// is the one Go applies when no policy is set.
+func refuseDowngrade(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("the server redirected to plain HTTP, which --secure does not allow")
+	}
+	return nil
 }
 
 // getServerList fetches the server JSON from a remote server

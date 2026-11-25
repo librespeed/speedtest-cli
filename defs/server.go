@@ -418,10 +418,11 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 	downloadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
-	// the last error of a failed request, returned when no request got an
-	// answer, so a broken path is not reported as a 0 Mbps result
-	var lastErr atomic.Pointer[error]
+	// whether any request was answered with data, and why the last one that
+	// was not failed
 	var succeeded atomic.Bool
+	var lastErr atomic.Pointer[error]
+	var failed bool
 
 	// one read buffer per worker, reused by its replacement requests: only
 	// one request per worker runs at a time
@@ -430,30 +431,55 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		bufs[i] = make([]byte, downloadReadSize)
 	}
 
-	doDownload := func(worker int) {
-		defer wg.Done()
-
-		reqClone := req.Clone(WithWorker(ctx, worker))
-		resp, err := http.DefaultClient.Do(reqClone)
+	// fetch makes one download request for a worker. An error means it
+	// brought no test data: the request failed, or the answer was not a
+	// success.
+	fetch := func(worker int) error {
+		resp, err := http.DefaultClient.Do(req.Clone(WithWorker(ctx, worker)))
 		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				output.WriteDebug("Failed when making HTTP request: %s\n", err)
-			}
-			if ctx.Err() == nil {
-				lastErr.Store(&err)
-			}
-			return
+			return err
 		}
 		defer resp.Body.Close()
-		succeeded.Store(true)
+
+		if err := refusal("download", resp); err != nil {
+			// an error page is not test data, so it is not counted
+			return err
+		}
 
 		// io.Copy into io.Discard would read in 8 KiB chunks (its ReadFrom),
 		// and Go's HTTP/2 client sends a WINDOW_UPDATE frame, in its own
 		// write, after every read that frees 4 KiB. Hiding ReadFrom makes
 		// CopyBuffer read into the larger buffer instead.
-		if _, err = io.CopyBuffer(struct{ io.Writer }{io.Discard}, io.TeeReader(resp.Body, counter), bufs[worker]); err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+		n, err := io.CopyBuffer(struct{ io.Writer }{io.Discard}, io.TeeReader(resp.Body, counter), bufs[worker])
+		if n == 0 {
+			// success without a single byte is not test data either
+			if err == nil {
+				err = errors.New("the download request returned no data")
+			}
+			return err
+		}
+		// A body that was cut short counts all the same, whoever cut it:
+		// the end of the test, --timeout or the server. What arrived did
+		// cross the link, and on a slow link no request gets its whole body.
+		succeeded.Store(true)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+		}
+		return nil
+	}
+
+	doDownload := func(worker int) {
+		defer wg.Done()
+
+		if err := fetch(worker); err != nil {
+			// cancellation is how the test ends, so it is not a failure
+			if ctx.Err() != nil {
+				return
+			}
+			output.WriteDebug("Download request failed: %s\n", err)
+			lastErr.Store(&err)
+			if !pauseBeforeRetry(ctx) {
+				return
 			}
 		}
 
@@ -488,6 +514,9 @@ func (s *Server) Download(silent bool, useBytes, useMebi bool, requests int, chu
 		// not a terminal
 		defer func() {
 			pb.Stop()
+			if failed {
+				return
+			}
 			if useBytes {
 				output.WriteUI("Download rate:\t%s\n", counter.AvgHumanize())
 			} else {
@@ -521,10 +550,10 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
-	// No request got a response: whatever went out is not a measurement of
-	// 0 Mbps, it is a broken path. A request that ran into the client
-	// timeout with a response in hand counts as a result.
+	// No request answered with data is not a result of 0 Mbps. Without an
+	// error either, they were all still waiting when the test ended.
 	if !succeeded.Load() {
+		failed = true
 		if err := lastErr.Load(); err != nil {
 			return 0, 0, *err
 		}
@@ -566,21 +595,33 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 	uploadDone := make(chan int, requests)
 
 	var wg sync.WaitGroup
-	// the last error of a failed request, returned when no request got an
-	// answer, so a broken path is not reported as a 0 Mbps result
-	var lastErr atomic.Pointer[error]
-	var answered atomic.Bool
+	// whether any request was accepted, whether one without an answer had
+	// at least been sending for a while, and the last refusal and the last
+	// other failure
+	var succeeded, carried atomic.Bool
+	var refusedWith, lastErr atomic.Pointer[error]
+	var failed bool
+
+	// The client follows a POST answered with 301, 302 or 303 as a GET
+	// without the payload, and the answer to that GET would count as an
+	// accepted upload. An upload is not sent on: a redirect is its answer.
+	client := *http.DefaultClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 
 	doUpload := func(worker int) {
 		defer wg.Done()
 
 		var bodyReader io.Reader
+		sent := &sentBytes{total: counter}
 		if noPrealloc {
 			bodyReader = &SeekWrapper{rand.Reader}
 		} else {
 			bodyReader = bytes.NewReader(counter.Payload())
+			sent.size = uint64(len(counter.Payload()))
 		}
-		countingReader := io.TeeReader(bodyReader, counter)
+		countingReader := io.TeeReader(bodyReader, sent)
 
 		uploadReq, err := http.NewRequestWithContext(WithWorker(ctx, worker), http.MethodPost, u.String(), countingReader)
 		if err != nil {
@@ -604,39 +645,74 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 			uploadReq.ContentLength = int64(len(counter.Payload()))
 		}
 
-		resp, err := http.DefaultClient.Do(uploadReq)
-		if err != nil {
-			if ctx.Err() != nil {
-				// cancellation is how the test ends, so it is not a failure
-				return
-			}
-			output.WriteDebug("Failed when making HTTP request: %s\n", err)
-			lastErr.Store(&err)
-			// The body cannot be replayed, so the transport does not retry
-			// it. Let the main loop start a new request instead, after a
-			// pause so a refused connection does not spin. In auto mode a
-			// failed HTTP/3 request has already moved the server to TCP, so
-			// the new request goes over TCP. The bytes this one sent stay
-			// counted: with --no-pre-allocate the body never ends, every
-			// request ends at --timeout, and the server got all of them.
-			select {
-			case <-time.After(uploadRetryDelay):
-			case <-ctx.Done():
-				return
-			}
-			select {
-			case uploadDone <- worker:
-			case <-ctx.Done():
-			}
+		resp, err := client.Do(uploadReq)
+		// A request that was not accepted has still carried data when it
+		// had been sending for a while, however it ended: with the test, at
+		// the client timeout or on a dropped connection. A body that never
+		// ends can also be cut by the server, with the status a server sends
+		// once it has read as much as it takes. Any other error status is a
+		// refusal, however long the request took to get it.
+		timedOut := resp == nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+		cut := noPrealloc && resp != nil && resp.StatusCode == http.StatusRequestEntityTooLarge && sent.started()
+		streamed := cut || (resp == nil && sent.sending(timedOut))
+		if streamed {
+			carried.Store(true)
+		}
+		if err != nil && ctx.Err() != nil {
+			// cancellation is how the test ends, so it is not a failure
 			return
 		}
-		defer resp.Body.Close()
-		answered.Store(true)
 
-		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-			// cancellation is how the test ends, so it is not a failure
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+		if resp != nil {
+			// A request is accepted once the server answers it with success:
+			// it has the payload then, whatever becomes of the rest of its
+			// answer.
+			if err = refusal("upload", resp); err == nil {
+				succeeded.Store(true)
+				if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+					// cancellation is how the test ends, so it is not a failure
+					if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+						output.WriteDebug("Failed when reading HTTP response: %s\n", err)
+					}
+				}
+			}
+			// closed before the pause below, not after it
+			resp.Body.Close()
+		}
+
+		// The client timeout cuts a request off while it is sending on a
+		// slow uplink, and with --no-pre-allocate where the body never
+		// ends. Such a request has not failed, and the next one follows it
+		// at once. Any other error is a failure.
+		if err != nil && !(streamed && timedOut) {
+			output.WriteDebug("Upload request failed: %s\n", err)
+			switch {
+			case streamed:
+				// what was sent before the request was cut stays counted
+				lastErr.Store(&err)
+			case resp != nil:
+				// what a refused request sent stays counted as well: it
+				// did cross the link
+				refusedWith.Store(&err)
+			case timedOut:
+				// The client timeout ended a request that had handed its
+				// payload over at once, or that sent nothing. What it sent
+				// may still be on its way, so it stays counted.
+				lastErr.Store(&err)
+			default:
+				// A connection that is dropped at once took in no more
+				// than the buffers on the way hold. Dropped requests are
+				// replaced several times a second, and that would add up.
+				lastErr.Store(&err)
+				sent.discount()
+			}
+			// The body cannot be sent again, so the transport does not
+			// retry a failed request. The main loop starts a new one
+			// instead, after a pause. In auto mode a failed HTTP/3 request
+			// has already moved the server to TCP, so the new request goes
+			// over TCP.
+			if !pauseBeforeRetry(ctx) {
+				return
 			}
 		}
 
@@ -671,6 +747,9 @@ func (s *Server) Upload(noPrealloc, silent, useBytes, useMebi bool, requests int
 		// not a terminal
 		defer func() {
 			pb.Stop()
+			if failed {
+				return
+			}
 			if useBytes {
 				output.WriteUI("Upload rate:\t%s\n", counter.AvgHumanize())
 			} else {
@@ -704,24 +783,100 @@ Loop:
 	// result doesn't change under us while it's being reported
 	wg.Wait()
 
-	// A request that ran into the client timeout was still sending, as with
-	// --no-pre-allocate where the body never ends, so its bytes count as a
-	// result. Nothing answered and nothing was sent is not a result of 0 Mbps.
-	if !answered.Load() && counter.Total() == 0 {
-		if err := lastErr.Load(); err != nil {
+	// No accepted request is a failure when the server refused one: that is
+	// the only answer it gave. Without any answer the upload can still be a
+	// measurement. On a slow uplink no payload gets through before the
+	// client timeout or the end of the test cuts its request off, and with
+	// --no-pre-allocate the body never ends. What was sent is reported
+	// then, as it always was, as long as some request had been sending for
+	// a while.
+	//
+	// A server that takes the payload and never answers can look like a
+	// slow uplink from here, where the buffers on the way hold the payload.
+	// It is told apart only where the payload was handed over at once.
+	if !succeeded.Load() {
+		if err := refusedWith.Load(); err != nil {
+			failed = true
 			return 0, 0, *err
 		}
-		return 0, 0, errors.New("no upload request was answered before the test ended")
-	}
-	if err := lastErr.Load(); err != nil && !answered.Load() && !isTimeout(*err) {
-		return 0, 0, *err
+		if !carried.Load() {
+			failed = true
+			if err := lastErr.Load(); err != nil {
+				return 0, 0, *err
+			}
+			return 0, 0, errors.New("no upload request was answered before the test ended")
+		}
 	}
 	return counter.AvgMbps(), counter.Total(), nil
 }
 
-func isTimeout(err error) bool {
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+// sendingProof is how long ago a request has to have sent its first byte
+// before what it sent stands as a measurement without an answer. A
+// connection that is dropped at once does not get that far.
+const sendingProof = 250 * time.Millisecond
+
+// sentBytes counts what one upload request sends, next to the counter of
+// the whole test, and keeps the time of its first byte and of the last byte
+// of its payload. The client may still read the body after it has returned,
+// so everything is locked.
+type sentBytes struct {
+	total *BytesCounter
+	// the length of the payload, zero for a body that never ends
+	size uint64
+
+	mu    sync.Mutex
+	n     uint64
+	first time.Time
+	whole time.Time
+	gone  bool
+}
+
+func (s *sentBytes) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gone {
+		return len(p), nil
+	}
+	if s.first.IsZero() {
+		s.first = time.Now()
+	}
+	s.n += uint64(len(p))
+	if s.size > 0 && s.n >= s.size && s.whole.IsZero() {
+		s.whole = time.Now()
+	}
+	return s.total.Write(p)
+}
+
+// started reports whether the request has sent anything.
+func (s *sentBytes) started() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.first.IsZero()
+}
+
+// sending reports whether the request has been sending: for sendingProof
+// since its first byte, or for any time at all when it is known to have
+// lasted, as one does that the client timeout cut off. A payload that was
+// handed over whole within sendingProof is not being sent any more. The
+// buffers on the way took it in, or the server did, and the request has
+// only waited for its answer since.
+func (s *sentBytes) sending(lasted bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.first.IsZero() || (!lasted && time.Since(s.first) < sendingProof) {
+		return false
+	}
+	return s.whole.IsZero() || s.whole.Sub(s.first) >= sendingProof
+}
+
+// discount takes what the request has sent back out of the count of the
+// test, and keeps out what it may still send.
+func (s *sentBytes) discount() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gone = true
+	s.total.Discount(s.n)
+	s.n = 0
 }
 
 // downloadReadSize is how much each download read asks for. On loopback,
@@ -730,8 +885,44 @@ func isTimeout(err error) bool {
 // HTTP/2 client, so the server is never left waiting for window.
 const downloadReadSize = 256 << 10
 
-// uploadRetryDelay spaces the retries of failed upload requests.
-const uploadRetryDelay = 200 * time.Millisecond
+// retryDelay spaces the requests that follow a failed one, so that a wrong
+// URL is not asked for as fast as the server can refuse it.
+const retryDelay = 200 * time.Millisecond
+
+// errorPageLimit is how much of a refused answer is read before it is closed.
+const errorPageLimit = 4 << 10
+
+// refusal reports a transfer request that was not answered with success.
+// Any 2xx status is success. Everything else comes with an error page or
+// nothing, not with test data, and that includes a redirect the client did
+// not follow.
+//
+// A short error page is read to its end, so that the retry can use the
+// connection again and does not open a new one each time. Only newer Go
+// versions do that on their own. A page that does not say how long it is
+// is left alone: reading it could wait for a server that never ends it.
+func refusal(phase string, resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		return nil
+	}
+	if n := resp.ContentLength; n > 0 && n <= errorPageLimit {
+		io.CopyN(io.Discard, resp.Body, n)
+	}
+	if text := http.StatusText(resp.StatusCode); text != "" {
+		return fmt.Errorf("the %s request returned HTTP %d %s", phase, resp.StatusCode, text)
+	}
+	return fmt.Errorf("the %s request returned HTTP %d", phase, resp.StatusCode)
+}
+
+// pauseBeforeRetry waits retryDelay and reports whether the test is still on.
+func pauseBeforeRetry(ctx context.Context) bool {
+	select {
+	case <-time.After(retryDelay):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // GetIPInfo accesses the backend's getIP.php endpoint and get current client's IP information
 func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
