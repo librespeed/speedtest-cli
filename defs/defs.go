@@ -254,12 +254,6 @@ func (l *LocationInfo) ValidLatitude() bool {
 	if l.LatitudeSet {
 		return isValidLatitude(l.Latitude)
 	}
-	// A direct struct with an omitted-latitude flag but a nonzero longitude
-	// can represent the explicit zero latitude 0 (for example 0,10).
-	if !l.LongitudeSet && l.Latitude == 0 && l.Longitude != 0 &&
-		isValidLatitude(l.Latitude) {
-		return true
-	}
 	return l.Latitude != 0 && isValidLatitude(l.Latitude)
 }
 
@@ -355,8 +349,8 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 
 // MergeLocations combines primary structured data with legacy fallback data.
 // Primary fields take precedence and fallback fills only missing fields.
-// A fallback country name is copied only when it has no country or matches
-// the effective country.
+// Geographic fallback fields are skipped when both country codes are present
+// and disagree.
 func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 	if primary == nil && fallback == nil {
 		return nil
@@ -366,18 +360,25 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 		merged = *primary
 	}
 	if fallback != nil {
-		if merged.City == "" {
-			merged.City = fallback.City
-		}
-		if merged.Region == "" {
-			merged.Region = fallback.Region
-		}
 		if merged.Country == "" {
 			merged.Country = fallback.Country
 		}
-		if merged.CountryName == "" {
-			effectiveCountry := strings.TrimSpace(merged.Country)
-			fallbackCountry := strings.TrimSpace(fallback.Country)
+
+		effectiveCountry := strings.TrimSpace(merged.Country)
+		fallbackCountry := strings.TrimSpace(fallback.Country)
+		compatibleFallback := fallbackCountry == "" ||
+			effectiveCountry == "" ||
+			strings.EqualFold(fallbackCountry, effectiveCountry)
+
+		if compatibleFallback {
+			if merged.City == "" {
+				merged.City = fallback.City
+			}
+			if merged.Region == "" {
+				merged.Region = fallback.Region
+			}
+		}
+		if compatibleFallback && merged.CountryName == "" {
 			if fallback.CountryName != "" &&
 				(fallbackCountry == "" ||
 					effectiveCountry == "" ||
@@ -385,11 +386,13 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 				merged.CountryName = fallback.CountryName
 			}
 		}
-		if !merged.ValidLatitude() && fallback.ValidLatitude() {
-			merged.SetLatitude(fallback.Latitude)
-		}
-		if !merged.ValidLongitude() && fallback.ValidLongitude() {
-			merged.SetLongitude(fallback.Longitude)
+		if compatibleFallback {
+			if !merged.ValidLatitude() && fallback.ValidLatitude() {
+				merged.SetLatitude(fallback.Latitude)
+			}
+			if !merged.ValidLongitude() && fallback.ValidLongitude() {
+				merged.SetLongitude(fallback.Longitude)
+			}
 		}
 	}
 	if !merged.HasData() {
