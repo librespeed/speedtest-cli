@@ -355,6 +355,8 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 
 // MergeLocations combines primary structured data with legacy fallback data.
 // Primary fields take precedence and fallback fills only missing fields.
+// A fallback country name is copied only when it has no country or matches
+// the effective country.
 func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 	if primary == nil && fallback == nil {
 		return nil
