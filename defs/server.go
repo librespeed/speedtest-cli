@@ -783,6 +783,7 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 			var partial struct {
 				ProcessedString string          `json:"processedString"`
 				RawISPInfo      json.RawMessage `json:"rawIspInfo"`
+				Location        json.RawMessage `json:"location"`
 			}
 			if err2 := json.Unmarshal(b, &partial); err2 == nil {
 				if partial.ProcessedString != "" {
@@ -791,6 +792,12 @@ func (s *Server) GetIPInfo(distanceUnit string) (*GetIPResult, error) {
 					ipInfo.ProcessedString = string(b)
 				}
 				ipInfo.RawISPInfo = partial.RawISPInfo
+				if len(partial.Location) > 0 {
+					var location LocationInfo
+					if err := json.Unmarshal(partial.Location, &location); err == nil && location.HasData() {
+						ipInfo.Location = &location
+					}
+				}
 			} else {
 				ipInfo.ProcessedString = string(b)
 			}

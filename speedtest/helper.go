@@ -28,6 +28,60 @@ const (
 	pingCount = 10
 )
 
+func approximateLocationSummary(location *defs.LocationInfo) string {
+	if location == nil {
+		return ""
+	}
+
+	var place []string
+	appendPlace := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		for _, existing := range place {
+			if existing == value {
+				return
+			}
+		}
+		place = append(place, value)
+	}
+	appendPlace(location.City)
+	appendPlace(location.Region)
+	if location.CountryName != "" {
+		appendPlace(location.CountryName)
+	} else {
+		appendPlace(location.Country)
+	}
+
+	summary := strings.Join(place, ", ")
+	if location.ValidCoordinates() {
+		latitude := strconv.FormatFloat(location.Latitude, 'f', -1, 64)
+		longitude := strconv.FormatFloat(location.Longitude, 'f', -1, 64)
+		coordinates := "(" + latitude + ", " + longitude + ")"
+		if summary == "" {
+			summary = coordinates
+		} else {
+			summary += " " + coordinates
+		}
+	} else if location.ValidLatitude() {
+		latitude := strconv.FormatFloat(location.Latitude, 'f', -1, 64)
+		if summary == "" {
+			summary = "Latitude " + latitude
+		} else {
+			summary += " (Latitude " + latitude + ")"
+		}
+	} else if location.ValidLongitude() {
+		longitude := strconv.FormatFloat(location.Longitude, 'f', -1, 64)
+		if summary == "" {
+			summary = "Longitude " + longitude
+		} else {
+			summary += " (Longitude " + longitude + ")"
+		}
+	}
+	return summary
+}
+
 // activeTransport routes the test servers' requests; nil until SpeedTest
 // sets it up. telemetryClient sends results over TCP only, even when the
 // telemetry server is also a test server reached over HTTP/3.
@@ -81,6 +135,9 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				return err
 			}
 			output.WriteUI("You're testing from: %s\n", output.Sanitize(ispInfo.ProcessedString))
+			if locationSummary := approximateLocationSummary(ispInfo.EffectiveLocation()); locationSummary != "" {
+				output.WriteUI("Approximate location: %s\n", output.Sanitize(locationSummary))
+			}
 			output.WriteDebug("IP info: %s\n", output.Sanitize(ispInfo.ProcessedString))
 
 			// get ping and jitter value
@@ -228,6 +285,18 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Upload = math.Round(uploadValue*100) / 100
 				rep.Share = shareLink
 				rep.IP = ispInfo.IP()
+				if location := ispInfo.EffectiveLocation(); location != nil {
+					rep.City = location.City
+					rep.Region = location.Region
+					rep.Country = location.Country
+					rep.CountryName = location.CountryName
+					if location.ValidLatitude() {
+						rep.Latitude = strconv.FormatFloat(location.Latitude, 'f', -1, 64)
+					}
+					if location.ValidLongitude() {
+						rep.Longitude = strconv.FormatFloat(location.Longitude, 'f', -1, 64)
+					}
+				}
 
 				reps_csv = append(reps_csv, rep)
 			} else if c.Bool(defs.OptionJSON) || c.Bool(defs.OptionJSONStream) {
@@ -255,7 +324,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					}
 				}
 
-				rep.Client = report.NewClient(ispInfo.RawISPInfo)
+				rep.Client = report.NewClient(ispInfo.RawISPInfo, ispInfo.EffectiveLocation())
 				rep.Client.Readme = ""
 				// IP() falls back to processedString, so the report carries an
 				// address even when the backend keeps rawIspInfo empty.

@@ -3,7 +3,49 @@ package speedtest
 import (
 	"sync"
 	"testing"
+
+	"github.com/librespeed/speedtest-cli/defs"
 )
+
+func TestApproximateLocationSummary(t *testing.T) {
+	location := &defs.LocationInfo{
+		City:        "Boydton",
+		Region:      "Virginia",
+		Country:     "US",
+		CountryName: "United States",
+		Latitude:    36.6676,
+		Longitude:   -78.3875,
+	}
+
+	if got, want := approximateLocationSummary(location), "Boydton, Virginia, United States (36.6676, -78.3875)"; got != want {
+		t.Errorf("approximateLocationSummary = %q, want %q", got, want)
+	}
+}
+
+func TestApproximateLocationSummaryMalformedCoordinates(t *testing.T) {
+	location := &defs.LocationInfo{
+		City:      "Boydton",
+		Region:    "Virginia",
+		Country:   "US",
+		Latitude:  91,
+		Longitude: -181,
+	}
+
+	if got, want := approximateLocationSummary(location), "Boydton, Virginia, US"; got != want {
+		t.Errorf("approximateLocationSummary = %q, want %q", got, want)
+	}
+}
+
+func TestApproximateLocationSummarySingleValidCoordinate(t *testing.T) {
+	location := &defs.LocationInfo{
+		City:     "Boydton",
+		Latitude: 36.6676,
+	}
+
+	if got, want := approximateLocationSummary(location), "Boydton (Latitude 36.6676)"; got != want {
+		t.Errorf("approximateLocationSummary = %q, want %q", got, want)
+	}
+}
 
 func TestWellKnownServerURL(t *testing.T) {
 	cases := []struct {

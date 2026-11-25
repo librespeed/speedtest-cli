@@ -45,12 +45,13 @@ type Server struct {
 // Client represents the speed test client's information
 type Client struct {
 	defs.IPInfoResponse
+	Location *defs.LocationInfo `json:"location,omitempty"`
 }
 
 // NewClient builds a Client from the raw ISP info payload a backend returned.
 // The payload may be an object, an empty string, or absent; anything that does
 // not parse as an object yields an empty Client rather than an error.
-func NewClient(raw json.RawMessage) Client {
+func NewClient(raw json.RawMessage, structuredLocations ...*defs.LocationInfo) Client {
 	var data struct {
 		defs.IPInfoResponse
 		ASName string `json:"as_name"`
@@ -66,6 +67,12 @@ func NewClient(raw json.RawMessage) Client {
 	if c.Organization == "" {
 		c.Organization = data.ASName
 	}
+
+	location := defs.LocationFromRawISPInfo(raw)
+	if len(structuredLocations) > 0 {
+		location = defs.MergeLocations(structuredLocations[0], location)
+	}
+	c.Location = location
 
 	return c
 }
