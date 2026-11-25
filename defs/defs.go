@@ -34,8 +34,47 @@ type LocationInfo struct {
 	Country     string  `json:"country,omitempty"`
 	CountryName string  `json:"countryName,omitempty"`
 
-	latitudeSet  bool
-	longitudeSet bool
+	// LatitudeSet and LongitudeSet distinguish an explicit zero coordinate
+	// from an omitted coordinate for callers constructing location values
+	// outside JSON unmarshalling.
+	LatitudeSet  bool `json:"-"`
+	LongitudeSet bool `json:"-"`
+}
+
+// SetLatitude records a valid latitude, including zero.
+// Invalid values clear the latitude instead of preserving a misleading value.
+func (l *LocationInfo) SetLatitude(latitude float64) {
+	if l == nil {
+		return
+	}
+	if isValidLatitude(latitude) {
+		l.Latitude = latitude
+		l.LatitudeSet = true
+		return
+	}
+	l.Latitude = 0
+	l.LatitudeSet = false
+}
+
+// SetLongitude records a valid longitude, including zero.
+// Invalid values clear the longitude instead of preserving a misleading value.
+func (l *LocationInfo) SetLongitude(longitude float64) {
+	if l == nil {
+		return
+	}
+	if isValidLongitude(longitude) {
+		l.Longitude = longitude
+		l.LongitudeSet = true
+		return
+	}
+	l.Longitude = 0
+	l.LongitudeSet = false
+}
+
+// SetCoordinates records both coordinates and marks zero values as present.
+func (l *LocationInfo) SetCoordinates(latitude, longitude float64) {
+	l.SetLatitude(latitude)
+	l.SetLongitude(longitude)
 }
 
 // UnmarshalJSON accepts numeric strings and numbers for optional coordinates,
@@ -61,18 +100,15 @@ func (l *LocationInfo) UnmarshalJSON(data []byte) error {
 	}
 
 	if latitude, ok := rawCoordinate(fields["latitude"]); ok && isValidLatitude(latitude) {
-		l.Latitude = latitude
-		l.latitudeSet = true
+		l.SetLatitude(latitude)
 	}
 	if longitude, ok := rawCoordinate(fields["longitude"]); ok && isValidLongitude(longitude) {
-		l.Longitude = longitude
-		l.longitudeSet = true
+		l.SetLongitude(longitude)
 	}
 	if !l.ValidLatitude() {
 		for _, key := range []string{"lat"} {
 			if latitude, ok := rawCoordinate(fields[key]); ok && isValidLatitude(latitude) {
-				l.Latitude = latitude
-				l.latitudeSet = true
+				l.SetLatitude(latitude)
 				break
 			}
 		}
@@ -80,8 +116,7 @@ func (l *LocationInfo) UnmarshalJSON(data []byte) error {
 	if !l.ValidLongitude() {
 		for _, key := range []string{"lon"} {
 			if longitude, ok := rawCoordinate(fields[key]); ok && isValidLongitude(longitude) {
-				l.Longitude = longitude
-				l.longitudeSet = true
+				l.SetLongitude(longitude)
 				break
 			}
 		}
@@ -94,15 +129,13 @@ func (l *LocationInfo) UnmarshalJSON(data []byte) error {
 				if !l.ValidLatitude() {
 					if latitude, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64); err == nil &&
 						isValidLatitude(latitude) {
-						l.Latitude = latitude
-						l.latitudeSet = true
+						l.SetLatitude(latitude)
 					}
 				}
 				if !l.ValidLongitude() {
 					if longitude, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64); err == nil &&
 						isValidLongitude(longitude) {
-						l.Longitude = longitude
-						l.longitudeSet = true
+						l.SetLongitude(longitude)
 					}
 				}
 			}
@@ -218,8 +251,14 @@ func (l *LocationInfo) ValidLatitude() bool {
 	if l == nil {
 		return false
 	}
-	if l.latitudeSet {
+	if l.LatitudeSet {
 		return isValidLatitude(l.Latitude)
+	}
+	// A direct struct with an omitted-latitude flag but a nonzero longitude
+	// can represent the explicit zero latitude 0 (for example 0,10).
+	if !l.LongitudeSet && l.Latitude == 0 && l.Longitude != 0 &&
+		isValidLatitude(l.Latitude) {
+		return true
 	}
 	return l.Latitude != 0 && isValidLatitude(l.Latitude)
 }
@@ -229,7 +268,7 @@ func (l *LocationInfo) ValidLongitude() bool {
 	if l == nil {
 		return false
 	}
-	if l.longitudeSet {
+	if l.LongitudeSet {
 		return isValidLongitude(l.Longitude)
 	}
 	return l.Longitude != 0 && isValidLongitude(l.Longitude)
@@ -278,13 +317,11 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 			if len(parts) == 2 {
 				if latitude, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64); err == nil &&
 					isValidLatitude(latitude) {
-					location.Latitude = latitude
-					location.latitudeSet = true
+					location.SetLatitude(latitude)
 				}
 				if longitude, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64); err == nil &&
 					isValidLongitude(longitude) {
-					location.Longitude = longitude
-					location.longitudeSet = true
+					location.SetLongitude(longitude)
 				}
 			}
 		}
@@ -292,15 +329,13 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 
 	for _, key := range []string{"latitude", "lat"} {
 		if latitude, ok := rawCoordinate(fields[key]); ok && isValidLatitude(latitude) {
-			location.Latitude = latitude
-			location.latitudeSet = true
+			location.SetLatitude(latitude)
 			break
 		}
 	}
 	for _, key := range []string{"longitude", "lon"} {
 		if longitude, ok := rawCoordinate(fields[key]); ok && isValidLongitude(longitude) {
-			location.Longitude = longitude
-			location.longitudeSet = true
+			location.SetLongitude(longitude)
 			break
 		}
 	}
@@ -339,15 +374,20 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 			merged.Country = fallback.Country
 		}
 		if merged.CountryName == "" {
-			merged.CountryName = fallback.CountryName
+			effectiveCountry := strings.TrimSpace(merged.Country)
+			fallbackCountry := strings.TrimSpace(fallback.Country)
+			if fallback.CountryName != "" &&
+				(fallbackCountry == "" ||
+					effectiveCountry == "" ||
+					strings.EqualFold(fallbackCountry, effectiveCountry)) {
+				merged.CountryName = fallback.CountryName
+			}
 		}
 		if !merged.ValidLatitude() && fallback.ValidLatitude() {
-			merged.Latitude = fallback.Latitude
-			merged.latitudeSet = fallback.latitudeSet
+			merged.SetLatitude(fallback.Latitude)
 		}
 		if !merged.ValidLongitude() && fallback.ValidLongitude() {
-			merged.Longitude = fallback.Longitude
-			merged.longitudeSet = fallback.longitudeSet
+			merged.SetLongitude(fallback.Longitude)
 		}
 	}
 	if !merged.HasData() {

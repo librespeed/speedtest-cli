@@ -134,3 +134,83 @@ func TestLocationFromLegacyRawIspInfo(t *testing.T) {
 		t.Errorf("legacy coordinates = (%v, %v)", location.Latitude, location.Longitude)
 	}
 }
+
+func TestLocationCoordinatesCanPreserveExplicitZero(t *testing.T) {
+	location := &LocationInfo{}
+	location.SetCoordinates(0, 10)
+
+	if !location.ValidLatitude() || location.Latitude != 0 || !location.LatitudeSet {
+		t.Errorf("explicit latitude zero not preserved: %#v", location)
+	}
+	if !location.ValidLongitude() || location.Longitude != 10 || !location.LongitudeSet {
+		t.Errorf("longitude not preserved: %#v", location)
+	}
+
+	b, err := json.Marshal(location)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if got, want := string(b), `{"latitude":0,"longitude":10}`; got != want {
+		t.Errorf("Marshal(location) = %s, want %s", got, want)
+	}
+}
+
+func TestLocationJSONPreservesExplicitZeroCoordinates(t *testing.T) {
+	var got GetIPResult
+	if err := json.Unmarshal([]byte(`{"processedString":"192.0.2.1","rawIspInfo":"","location":{"latitude":0,"longitude":10}}`), &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Location == nil || !got.Location.ValidLatitude() || got.Location.Latitude != 0 ||
+		!got.Location.LatitudeSet {
+		t.Errorf("decoded zero latitude not preserved: %#v", got.Location)
+	}
+	if got.Location == nil || !got.Location.ValidLongitude() || got.Location.Longitude != 10 ||
+		!got.Location.LongitudeSet {
+		t.Errorf("decoded longitude not preserved: %#v", got.Location)
+	}
+}
+
+func TestMergeLocationsDoesNotReplaceExplicitZeroCoordinate(t *testing.T) {
+	primary := &LocationInfo{Latitude: 0, Longitude: 10}
+	fallback := LocationFromRawISPInfo(json.RawMessage(`{"latitude":36.6676,"longitude":-78.3875}`))
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if !merged.ValidLatitude() || merged.Latitude != 0 {
+		t.Errorf("explicit zero latitude replaced: %#v", merged)
+	}
+	if !merged.ValidLongitude() || merged.Longitude != 10 {
+		t.Errorf("primary longitude replaced: %#v", merged)
+	}
+}
+
+func TestMergeLocationsDoesNotCopyCountryNameForDifferentCountry(t *testing.T) {
+	primary := &LocationInfo{City: "Berlin", Country: "DE"}
+	fallback := &LocationInfo{Country: "US", CountryName: "United States"}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "DE" {
+		t.Errorf("merged country = %q, want DE", merged.Country)
+	}
+	if merged.CountryName != "" {
+		t.Errorf("fallback country name crossed countries: %#v", merged)
+	}
+}
+
+func TestMergeLocationsCopiesMatchingCountryName(t *testing.T) {
+	primary := &LocationInfo{Country: "DE"}
+	fallback := &LocationInfo{Country: "de", CountryName: "Germany"}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.CountryName != "Germany" {
+		t.Errorf("matching country name not copied: %#v", merged)
+	}
+}
