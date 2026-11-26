@@ -265,6 +265,64 @@ func TestMergeLocationsCopiesMatchingCountryName(t *testing.T) {
 	}
 }
 
+func TestMergeLocationsRejectsDifferentExplicitCodesWithSharedName(t *testing.T) {
+	primary := &LocationInfo{
+		City:        "Berlin",
+		Country:     "DE",
+		CountryName: "Deutschland",
+	}
+	fallback := &LocationInfo{
+		City:        "Boydton",
+		Region:      "Virginia",
+		Country:     "US",
+		CountryName: "Deutschland",
+		Latitude:    36.6676,
+		Longitude:   -78.3875,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "DE" || merged.CountryName != "Deutschland" {
+		t.Errorf("primary country identity changed: %#v", merged)
+	}
+	if merged.City != "Berlin" || merged.Region != "" {
+		t.Errorf("fallback place crossed differing explicit codes: %#v", merged)
+	}
+	if merged.ValidCoordinates() {
+		t.Errorf("fallback coordinates crossed differing explicit codes: %#v", merged)
+	}
+}
+
+func TestMergeLocationsFinlandNameAndCodeAreEquivalent(t *testing.T) {
+	primary := &LocationInfo{CountryName: "Finland"}
+	fallback := &LocationInfo{
+		City:      "Helsinki",
+		Region:    "Uusimaa",
+		Country:   "FI",
+		Latitude:  60.1699,
+		Longitude: 24.9384,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "FI" {
+		t.Errorf("compatible Finland country code not copied: %#v", merged)
+	}
+	if merged.CountryName != "Finland" {
+		t.Errorf("primary Finland country name changed: %#v", merged)
+	}
+	if merged.City != "Helsinki" || merged.Region != "Uusimaa" {
+		t.Errorf("compatible Finland place not merged: %#v", merged)
+	}
+	if !merged.ValidCoordinates() || merged.Latitude != 60.1699 || merged.Longitude != 24.9384 {
+		t.Errorf("compatible Finland coordinates not merged: %#v", merged)
+	}
+}
+
 func TestMergeLocationsCountryNameOnlyRejectsConflictingFallback(t *testing.T) {
 	primary := &LocationInfo{
 		City:        "Washington",

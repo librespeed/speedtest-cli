@@ -6,6 +6,9 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 )
 
 var (
@@ -42,73 +45,46 @@ type LocationInfo struct {
 	coordinatesPaired bool
 }
 
-var countryIdentityAliases = map[string]string{
-	"us":                       "US",
-	"usa":                      "US",
-	"united states":            "US",
-	"united states of america": "US",
-	"america":                  "US",
-	"de":                       "DE",
-	"deu":                      "DE",
-	"ger":                      "DE",
-	"germany":                  "DE",
-	"gb":                       "GB",
-	"gbr":                      "GB",
-	"uk":                       "GB",
-	"united kingdom":           "GB",
-	"great britain":            "GB",
-	"ca":                       "CA",
-	"can":                      "CA",
-	"canada":                   "CA",
-	"au":                       "AU",
-	"aus":                      "AU",
-	"australia":                "AU",
-	"cn":                       "CN",
-	"chn":                      "CN",
-	"china":                    "CN",
-	"fr":                       "FR",
-	"fra":                      "FR",
-	"france":                   "FR",
-	"in":                       "IN",
-	"ind":                      "IN",
-	"india":                    "IN",
-	"it":                       "IT",
-	"ita":                      "IT",
-	"italy":                    "IT",
-	"jp":                       "JP",
-	"jpn":                      "JP",
-	"japan":                    "JP",
-	"mx":                       "MX",
-	"mex":                      "MX",
-	"mexico":                   "MX",
-	"nl":                       "NL",
-	"nld":                      "NL",
-	"netherlands":              "NL",
-	"nz":                       "NZ",
-	"nzl":                      "NZ",
-	"new zealand":              "NZ",
-	"br":                       "BR",
-	"bra":                      "BR",
-	"brazil":                   "BR",
-	"es":                       "ES",
-	"esp":                      "ES",
-	"spain":                    "ES",
-	"se":                       "SE",
-	"swe":                      "SE",
-	"sweden":                   "SE",
-	"ch":                       "CH",
-	"che":                      "CH",
-	"switzerland":              "CH",
-	"at":                       "AT",
-	"aut":                      "AT",
-	"austria":                  "AT",
-	"cz":                       "CZ",
-	"cze":                      "CZ",
-	"czechia":                  "CZ",
-	"czech republic":           "CZ",
-	"pl":                       "PL",
-	"pol":                      "PL",
-	"poland":                   "PL",
+var countryIdentityAliases = buildCountryIdentityAliases()
+
+func buildCountryIdentityAliases() map[string]string {
+	aliases := make(map[string]string)
+
+	// Build the complete alpha-2 country-code to English-name policy from CLDR.
+	// This also avoids maintaining a partial hand-written ISO country table.
+	namer := display.English.Regions()
+	for _, region := range language.Supported.Regions() {
+		code := region.String()
+		if len(code) != 2 {
+			continue
+		}
+		code = strings.ToUpper(code)
+		normalizedCode := normalizeCountryIdentity(code)
+		aliases[normalizedCode] = code
+
+		name := strings.TrimSpace(namer.Name(region))
+		if name != "" {
+			aliases[normalizeCountryIdentity(name)] = code
+		}
+	}
+
+	// Preserve common English aliases and alpha-3 spellings outside CLDR labels.
+	for alias, code := range map[string]string{
+		"usa":                      "US",
+		"us":                       "US",
+		"united states":            "US",
+		"united states of america": "US",
+		"america":                  "US",
+		"deu":                      "DE",
+		"ger":                      "DE",
+		"gbr":                      "GB",
+		"uk":                       "GB",
+		"great britain":            "GB",
+		"fin":                      "FI",
+	} {
+		aliases[normalizeCountryIdentity(alias)] = code
+	}
+	return aliases
 }
 
 // SetLatitude records a valid latitude, including zero.
@@ -397,6 +373,21 @@ func locationCountryIdentities(location *LocationInfo) ([]string, bool) {
 }
 
 func countryIdentitiesCompatible(primary, fallback *LocationInfo) bool {
+	// Explicit country codes are authoritative. Never let a shared name
+	// override two different nonempty country codes.
+	primaryCode := ""
+	fallbackCode := ""
+	if primary != nil {
+		primaryCode = strings.TrimSpace(primary.Country)
+	}
+	if fallback != nil {
+		fallbackCode = strings.TrimSpace(fallback.Country)
+	}
+	if primaryCode != "" && fallbackCode != "" &&
+		canonicalCountryIdentity(primaryCode) != canonicalCountryIdentity(fallbackCode) {
+		return false
+	}
+
 	primaryIdentities, primaryValid := locationCountryIdentities(primary)
 	fallbackIdentities, fallbackValid := locationCountryIdentities(fallback)
 	if !primaryValid || !fallbackValid {
