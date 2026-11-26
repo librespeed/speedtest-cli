@@ -15,4 +15,11 @@ type CSVReport struct {
 	Upload    float64   `csv:"Upload"`
 	Share     string    `csv:"Share"`
 	IP        string    `csv:"IP"`
+	// Location columns are appended after IP to preserve existing CSV positions.
+	City        string `csv:"City"`
+	Region      string `csv:"Region"`
+	Country     string `csv:"Country"`
+	CountryName string `csv:"Country Name"`
+	Latitude    string `csv:"Latitude"`
+	Longitude   string `csv:"Longitude"`
 }

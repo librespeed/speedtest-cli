@@ -45,12 +45,29 @@ type Server struct {
 // Client represents the speed test client's information
 type Client struct {
 	defs.IPInfoResponse
+	// Location is normalized approximate IP-derived metadata. It is separate
+	// from the legacy embedded IPInfoResponse.Location (the "loc" field).
+	Location *defs.LocationInfo `json:"location,omitempty"`
 }
 
 // NewClient builds a Client from the raw ISP info payload a backend returned.
 // The payload may be an object, an empty string, or absent; anything that does
 // not parse as an object yields an empty Client rather than an error.
-func NewClient(raw json.RawMessage) Client {
+func NewClient(raw json.RawMessage, structuredLocations ...*defs.LocationInfo) Client {
+	if len(structuredLocations) > 1 {
+		// A structured location argument is optional and singular. Reject extra
+		// arguments without applying the silently selected first value.
+		return NewClientWithLocation(raw, nil)
+	}
+	if len(structuredLocations) == 1 {
+		return NewClientWithLocation(raw, structuredLocations[0])
+	}
+	return NewClientWithLocation(raw, nil)
+}
+
+// NewClientWithLocation is the explicit form of NewClient for structured
+// location metadata. Legacy rawIspInfo location fields remain a fallback.
+func NewClientWithLocation(raw json.RawMessage, structuredLocation *defs.LocationInfo) Client {
 	var data struct {
 		defs.IPInfoResponse
 		ASName string `json:"as_name"`
@@ -61,11 +78,18 @@ func NewClient(raw json.RawMessage) Client {
 	}
 
 	c := Client{IPInfoResponse: data.IPInfoResponse}
+	c.City = defs.CleanLocationText(c.City)
+	c.Region = defs.CleanLocationText(c.Region)
+	c.Country = defs.CleanLocationText(c.Country)
 
 	// Current backends use as_name, while older ones use org.
 	if c.Organization == "" {
 		c.Organization = data.ASName
 	}
+
+	location := defs.LocationFromRawISPInfo(raw)
+	location = defs.MergeLocations(structuredLocation, location)
+	c.Location = location
 
 	return c
 }

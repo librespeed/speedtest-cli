@@ -90,6 +90,67 @@ func TestGetIPInfoAbsentRawIspInfo(t *testing.T) {
 	}
 }
 
+func TestGetIPInfoParsesStructuredLocation(t *testing.T) {
+	got := getIPResultFromPayload(t, `{
+		"processedString":"128.94.2.134 - AS8075",
+		"rawIspInfo":{"ip":"128.94.2.134","org":"Microsoft"},
+		"location":{"city":"Boydton","region":"Virginia","country":"US","countryName":"United States","latitude":"36.6676","longitude":"-78.3875"}
+	}`)
+
+	location := got.Location
+	if location == nil {
+		t.Fatal("Location returned nil")
+	}
+	if location.City != "Boydton" || location.Region != "Virginia" ||
+		location.Country != "US" || location.CountryName != "United States" {
+		t.Errorf("Location = %#v", location)
+	}
+	if !location.ValidCoordinates() || location.Latitude != 36.6676 || location.Longitude != -78.3875 {
+		t.Errorf("coordinates = (%v, %v), valid=%t", location.Latitude, location.Longitude, location.ValidCoordinates())
+	}
+}
+
+func TestGetIPInfoMalformedLocationIsNonFatal(t *testing.T) {
+	got := getIPResultFromPayload(t, `{
+		"processedString":"192.0.2.1 - Example ISP",
+		"rawIspInfo":{"ip":"192.0.2.1","org":"Example"},
+		"location":{"city":"Example City","latitude":"bad","longitude":181}
+	}`)
+
+	if got.ProcessedString != "192.0.2.1 - Example ISP" {
+		t.Errorf("ProcessedString = %q", got.ProcessedString)
+	}
+	if got.IP() != "192.0.2.1" {
+		t.Errorf("IP() = %q, want 192.0.2.1", got.IP())
+	}
+	if got.Location == nil || got.Location.City != "Example City" {
+		t.Errorf("valid location text was lost: %#v", got.Location)
+	}
+	if got.Location.ValidCoordinates() {
+		t.Errorf("malformed coordinates accepted: %#v", got.Location)
+	}
+}
+
+func TestGetIPInfoCountryOnlyLocationKeepsPartialPlace(t *testing.T) {
+	got := getIPResultFromPayload(t, `{
+		"processedString":"128.94.2.134 - AS8075",
+		"rawIspInfo":{"ip":"128.94.2.134","city":"Boydton","region":"Virginia","country":"US","loc":"36.6676,-78.3875","org":"Microsoft"},
+		"location":{"country":"US","countryName":"United States"}
+	}`)
+
+	location := got.EffectiveLocation()
+	if location == nil {
+		t.Fatal("EffectiveLocation returned nil")
+	}
+	if location.City != "Boydton" || location.Region != "Virginia" ||
+		location.Country != "US" || location.CountryName != "United States" {
+		t.Errorf("country-only location lost partial place: %#v", location)
+	}
+	if !location.ValidCoordinates() || location.Latitude != 36.6676 || location.Longitude != -78.3875 {
+		t.Errorf("country-only location lost coordinates: %#v", location)
+	}
+}
+
 // --- Upload against a server with librespeed-rs body semantics ---
 
 // librespeedRSLikeServer mimics the hand-written HTTP body handling of

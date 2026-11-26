@@ -219,6 +219,14 @@ GLOBAL OPTIONS:
                                   Implies --share
 ```
 
+When the selected LibreSpeed server returns optional approximate IP location metadata,
+JSON reports add `client.location` and CSV reports append `City`, `Region`, `Country`,
+`Country Name`, `Latitude`, and `Longitude` columns after `IP`. The existing JSON client
+fields and first nine CSV columns retain their previous meanings and positions. No browser
+GPS location is requested. The legacy JSON `client.city`, `client.region`, and
+`client.country` fields continue to come from `rawIspInfo`; `client.location` is the
+normalized structured view and is preferred for approximate location display.
+
 ## Use a custom backend server list
 The `librespeed-cli` supports loading custom backend server list from a JSON file (remotely via `--server-json` or
 locally via `--local-json`). The format is as below:
@@ -278,6 +286,10 @@ For `telemetryLevel`, four values are available:
 `shareURL` is the path for fetching the uploaded result in PNG format.
 
 Currently, `--telemetry-json` only supports loading a local JSON file.
+
+The telemetry `ispinfo` multipart field preserves `processedString` and `rawIspInfo` and,
+when available, adds the normalized approximate `location` object. A third-party telemetry
+server may receive that metadata if telemetry is enabled.
 
 ## Bugs?
 

@@ -110,6 +110,96 @@ func mockBackend(t *testing.T) *httptest.Server {
 	return srv
 }
 
+func TestLocationJSONAndJSONStreamParity(t *testing.T) {
+	payload := `{"processedString":"128.94.2.134 - AS8075","rawIspInfo":{"ip":"128.94.2.134","city":"Old City","region":"Old Region","country":"US","loc":"36.6676,-78.3875","org":"Microsoft"},"location":{"city":"Boydton","region":"Virginia","country":"US","countryName":"United States","latitude":"36.6676","longitude":"-78.3875"}}`
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/getIP.php":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(payload))
+		case "/empty.php":
+		default:
+			w.Header().Set("Content-Type", "text/plain")
+		}
+	}))
+	t.Cleanup(backend.Close)
+
+	list := writeServerList(t, listedServer{1, "Location", backend.URL, "empty.php"})
+	args := []string{"--local-json", list, "--server", "1", "--duration", "1", "--no-icmp", "--no-download", "--no-upload"}
+
+	jsonRun := runCLI(t, append(append([]string{}, args...), "--json")...)
+	if jsonRun.code != 0 {
+		t.Fatalf("JSON run failed: %s", jsonRun.stderr)
+	}
+	streamRun := runCLI(t, append(append([]string{}, args...), "--json-stream")...)
+	if streamRun.code != 0 {
+		t.Fatalf("JSON-stream run failed: %s", streamRun.stderr)
+	}
+
+	type locationReport struct {
+		Client struct {
+			Location *struct {
+				City        string  `json:"city"`
+				Region      string  `json:"region"`
+				Country     string  `json:"country"`
+				CountryName string  `json:"countryName"`
+				Latitude    float64 `json:"latitude"`
+				Longitude   float64 `json:"longitude"`
+			} `json:"location"`
+		} `json:"client"`
+	}
+
+	var jsonReports []locationReport
+	if err := json.Unmarshal([]byte(jsonRun.stdout), &jsonReports); err != nil {
+		t.Fatalf("JSON stdout is invalid: %v\n%s", err, jsonRun.stdout)
+	}
+	if len(jsonReports) != 1 || jsonReports[0].Client.Location == nil {
+		t.Fatalf("JSON location missing: %s", jsonRun.stdout)
+	}
+
+	var streamLocation *struct {
+		City        string  `json:"city"`
+		Region      string  `json:"region"`
+		Country     string  `json:"country"`
+		CountryName string  `json:"countryName"`
+		Latitude    float64 `json:"latitude"`
+		Longitude   float64 `json:"longitude"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(streamRun.stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var event struct {
+			Event   string           `json:"event"`
+			Reports []locationReport `json:"reports"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("JSON-stream line is invalid: %v\n%s", err, line)
+		}
+		if event.Event == "result" && len(event.Reports) == 1 {
+			streamLocation = event.Reports[0].Client.Location
+		}
+	}
+	if streamLocation == nil {
+		t.Fatalf("JSON-stream location missing: %s", streamRun.stdout)
+	}
+
+	jsonLocation := jsonReports[0].Client.Location
+	if jsonLocation.City != "Boydton" || jsonLocation.Region != "Virginia" ||
+		jsonLocation.Country != "US" || jsonLocation.CountryName != "United States" ||
+		jsonLocation.Latitude != 36.6676 || jsonLocation.Longitude != -78.3875 {
+		t.Errorf("unexpected JSON location: %#v", jsonLocation)
+	}
+	if jsonLocation.City != streamLocation.City ||
+		jsonLocation.Region != streamLocation.Region ||
+		jsonLocation.Country != streamLocation.Country ||
+		jsonLocation.CountryName != streamLocation.CountryName ||
+		jsonLocation.Latitude != streamLocation.Latitude ||
+		jsonLocation.Longitude != streamLocation.Longitude {
+		t.Errorf("JSON and JSON-stream locations differ: JSON=%#v stream=%#v", jsonLocation, streamLocation)
+	}
+}
+
 // deadURL is a server URL nothing listens on.
 func deadURL(t *testing.T) string {
 	t.Helper()
