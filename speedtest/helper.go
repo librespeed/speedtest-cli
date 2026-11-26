@@ -10,7 +10,9 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,8 +53,16 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 	var reps_json []report.JSONReport
 	var reps_csv []report.CSVReport
 	var measured bool
-	// each server that did not answer its probe, and why
+	// each server that gave no result, and why: it did not answer its probe,
+	// or its download or upload test failed
 	var down []downServer
+
+	// add a new line after each test if testing multiple servers
+	separate := func() {
+		if len(servers) > 1 && !silent {
+			output.WriteUIBlank()
+		}
+	}
 
 	// fetch current user's IP info
 	for _, currentServer := range servers {
@@ -137,8 +147,13 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				download, br, err := currentServer.Download(silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionChunks), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get download speed: %s\n", output.Sanitize(err.Error()))
-					return err
+					// with one server the error that ends the run says it
+					if len(servers) > 1 {
+						output.WriteError("Failed to get download speed: %s\n", output.Sanitize(err.Error()))
+					}
+					down = append(down, failedServer(currentServer, u, err, true))
+					separate()
+					continue
 				}
 				downloadValue = download
 				bytesRead = br
@@ -159,8 +174,13 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 
 				upload, bw, err := currentServer.Upload(c.Bool(defs.OptionNoPreAllocate), silent, c.Bool(defs.OptionBytes), c.Bool(defs.OptionMebiBytes), c.Int(defs.OptionConcurrent), c.Int(defs.OptionUploadSize), time.Duration(c.Int(defs.OptionDuration))*time.Second)
 				if err != nil {
-					output.WriteError("Failed to get upload speed: %s\n", output.Sanitize(err.Error()))
-					return err
+					// with one server the error that ends the run says it
+					if len(servers) > 1 {
+						output.WriteError("Failed to get upload speed: %s\n", output.Sanitize(err.Error()))
+					}
+					down = append(down, failedServer(currentServer, u, err, true))
+					separate()
+					continue
 				}
 				uploadValue = upload
 				bytesWritten = bw
@@ -267,20 +287,14 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 			measured = true
 		} else {
 			output.WriteUI("Selected server %s (%s) is not responding at the moment, try again later\n", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname()))
-			down = append(down, downServer{
-				server: fmt.Sprintf("%s (%s)", output.Sanitize(currentServer.Name), output.Sanitize(u.Hostname())),
-				reason: output.Sanitize(upErr.Error()),
-			})
+			down = append(down, failedServer(currentServer, u, upErr, false))
 		}
 
-		//add a new line after each test if testing multiple servers
-		if len(servers) > 1 && !silent {
-			output.WriteUIBlank()
-		}
+		separate()
 	}
 
-	// No server answered: fail instead of printing an empty report, which
-	// with exit status 0 would pass for a result.
+	// No server gave a result: fail instead of printing an empty report,
+	// which with exit status 0 would pass for a result.
 	if !measured && len(down) > 0 {
 		return noneResponding(down)
 	}
@@ -307,21 +321,43 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 	return nil
 }
 
-// downServer is a selected server that did not answer its probe.
+// downServer is a selected server that gave no result.
 type downServer struct {
 	server string // name and host, ready to print
 	reason string
+	// answered tells a server that answered its probe and then failed its
+	// download or upload test from one that did not answer at all
+	answered bool
+}
+
+// failedServer notes a server that gave no result, and why.
+func failedServer(s defs.Server, u *url.URL, err error, answered bool) downServer {
+	return downServer{
+		server:   fmt.Sprintf("%s (%s)", output.Sanitize(s.Name), output.Sanitize(u.Hostname())),
+		reason:   output.Sanitize(err.Error()),
+		answered: answered,
+	}
 }
 
 // noneResponding names every selected server with its cause. It is printed
-// after "Terminated due to error: ", hence the capital letter.
+// after "Terminated due to error: ", hence the capital letter. A server that
+// answered its probe did respond, so with one of those among them the text
+// speaks of results instead.
 func noneResponding(down []downServer) error {
+	answered := slices.ContainsFunc(down, func(d downServer) bool { return d.answered })
+
 	if len(down) == 1 {
+		if answered {
+			return fmt.Errorf("Selected server %s gave no result: %s", down[0].server, down[0].reason)
+		}
 		return fmt.Errorf("Selected server %s is not responding: %s", down[0].server, down[0].reason)
 	}
 	causes := make([]string, 0, len(down))
 	for _, d := range down {
 		causes = append(causes, d.server+": "+d.reason)
+	}
+	if answered {
+		return fmt.Errorf("None of the %d selected servers gave a result: %s", len(down), strings.Join(causes, "; "))
 	}
 	return fmt.Errorf("None of the %d selected servers is responding: %s", len(down), strings.Join(causes, "; "))
 }
