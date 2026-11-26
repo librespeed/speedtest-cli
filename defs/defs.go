@@ -37,8 +37,78 @@ type LocationInfo struct {
 	// LatitudeSet and LongitudeSet distinguish an explicit zero coordinate
 	// from an omitted coordinate for callers constructing location values
 	// outside JSON unmarshalling.
-	LatitudeSet  bool `json:"-"`
-	LongitudeSet bool `json:"-"`
+	LatitudeSet       bool `json:"-"`
+	LongitudeSet      bool `json:"-"`
+	coordinatesPaired bool
+}
+
+var countryIdentityAliases = map[string]string{
+	"us":                       "US",
+	"usa":                      "US",
+	"united states":            "US",
+	"united states of america": "US",
+	"america":                  "US",
+	"de":                       "DE",
+	"deu":                      "DE",
+	"ger":                      "DE",
+	"germany":                  "DE",
+	"gb":                       "GB",
+	"gbr":                      "GB",
+	"uk":                       "GB",
+	"united kingdom":           "GB",
+	"great britain":            "GB",
+	"ca":                       "CA",
+	"can":                      "CA",
+	"canada":                   "CA",
+	"au":                       "AU",
+	"aus":                      "AU",
+	"australia":                "AU",
+	"cn":                       "CN",
+	"chn":                      "CN",
+	"china":                    "CN",
+	"fr":                       "FR",
+	"fra":                      "FR",
+	"france":                   "FR",
+	"in":                       "IN",
+	"ind":                      "IN",
+	"india":                    "IN",
+	"it":                       "IT",
+	"ita":                      "IT",
+	"italy":                    "IT",
+	"jp":                       "JP",
+	"jpn":                      "JP",
+	"japan":                    "JP",
+	"mx":                       "MX",
+	"mex":                      "MX",
+	"mexico":                   "MX",
+	"nl":                       "NL",
+	"nld":                      "NL",
+	"netherlands":              "NL",
+	"nz":                       "NZ",
+	"nzl":                      "NZ",
+	"new zealand":              "NZ",
+	"br":                       "BR",
+	"bra":                      "BR",
+	"brazil":                   "BR",
+	"es":                       "ES",
+	"esp":                      "ES",
+	"spain":                    "ES",
+	"se":                       "SE",
+	"swe":                      "SE",
+	"sweden":                   "SE",
+	"ch":                       "CH",
+	"che":                      "CH",
+	"switzerland":              "CH",
+	"at":                       "AT",
+	"aut":                      "AT",
+	"austria":                  "AT",
+	"cz":                       "CZ",
+	"cze":                      "CZ",
+	"czechia":                  "CZ",
+	"czech republic":           "CZ",
+	"pl":                       "PL",
+	"pol":                      "PL",
+	"poland":                   "PL",
 }
 
 // SetLatitude records a valid latitude, including zero.
@@ -75,6 +145,7 @@ func (l *LocationInfo) SetLongitude(longitude float64) {
 func (l *LocationInfo) SetCoordinates(latitude, longitude float64) {
 	l.SetLatitude(latitude)
 	l.SetLongitude(longitude)
+	l.coordinatesPaired = l.ValidLatitude() && l.ValidLongitude()
 }
 
 // UnmarshalJSON accepts numeric strings and numbers for optional coordinates,
@@ -140,6 +211,9 @@ func (l *LocationInfo) UnmarshalJSON(data []byte) error {
 				}
 			}
 		}
+	}
+	if l.LatitudeSet && l.LongitudeSet {
+		l.coordinatesPaired = true
 	}
 
 	return nil
@@ -246,6 +320,113 @@ func isValidLongitude(longitude float64) bool {
 	return longitude >= -180 && longitude <= 180
 }
 
+func normalizeCountryIdentity(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer(".", "", "_", " ", "-", " ").Replace(value)
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func canonicalCountryIdentity(value string) string {
+	normalized := normalizeCountryIdentity(value)
+	if canonical, ok := countryIdentityAliases[normalized]; ok {
+		return canonical
+	}
+	if len(normalized) == 2 {
+		return strings.ToUpper(normalized)
+	}
+	return normalized
+}
+
+func countryNameIsKnown(value string) bool {
+	normalized := normalizeCountryIdentity(value)
+	_, ok := countryIdentityAliases[normalized]
+	return ok
+}
+
+func countryCodeAndNameConsistent(code, name string) bool {
+	code = strings.TrimSpace(code)
+	name = strings.TrimSpace(name)
+	if code == "" || name == "" {
+		return true
+	}
+
+	canonicalCode := canonicalCountryIdentity(code)
+	canonicalName := canonicalCountryIdentity(name)
+	if canonicalCode == canonicalName {
+		return true
+	}
+
+	// Known country names and codes must agree. Unknown names cannot be
+	// disproven by an ISO-style code alone, so they remain neutral.
+	return !countryNameIsKnown(name)
+}
+
+func locationCountryIdentities(location *LocationInfo) ([]string, bool) {
+	if location == nil {
+		return nil, true
+	}
+
+	code := strings.TrimSpace(location.Country)
+	name := strings.TrimSpace(location.CountryName)
+	if code == "" && name == "" {
+		return nil, true
+	}
+	if !countryCodeAndNameConsistent(code, name) {
+		return nil, false
+	}
+
+	var identities []string
+	addIdentity := func(identity string) {
+		if identity == "" {
+			return
+		}
+		for _, existing := range identities {
+			if existing == identity {
+				return
+			}
+		}
+		identities = append(identities, identity)
+	}
+	if code != "" {
+		addIdentity(canonicalCountryIdentity(code))
+	}
+	if name != "" {
+		addIdentity(canonicalCountryIdentity(name))
+	}
+	return identities, true
+}
+
+func countryIdentitiesCompatible(primary, fallback *LocationInfo) bool {
+	primaryIdentities, primaryValid := locationCountryIdentities(primary)
+	fallbackIdentities, fallbackValid := locationCountryIdentities(fallback)
+	if !primaryValid || !fallbackValid {
+		return false
+	}
+	if len(primaryIdentities) == 0 || len(fallbackIdentities) == 0 {
+		return true
+	}
+	for _, primaryIdentity := range primaryIdentities {
+		for _, fallbackIdentity := range fallbackIdentities {
+			if primaryIdentity == fallbackIdentity {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (l *LocationInfo) hasPairedCoordinates() bool {
+	if l == nil {
+		return false
+	}
+	if l.coordinatesPaired {
+		return l.ValidLatitude() && l.ValidLongitude()
+	}
+	// Directly constructed LocationInfo values with both nonzero coordinates
+	// are treated as a pair; callers with one coordinate omit the other.
+	return l.ValidLatitude() && l.ValidLongitude()
+}
+
 // ValidLatitude reports whether a present latitude is within its geographic range.
 func (l *LocationInfo) ValidLatitude() bool {
 	if l == nil {
@@ -317,6 +498,9 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 					isValidLongitude(longitude) {
 					location.SetLongitude(longitude)
 				}
+				if location.ValidLatitude() && location.ValidLongitude() {
+					location.coordinatesPaired = true
+				}
 			}
 		}
 	}
@@ -332,6 +516,9 @@ func LocationFromRawISPInfo(raw json.RawMessage) *LocationInfo {
 			location.SetLongitude(longitude)
 			break
 		}
+	}
+	if location.ValidLatitude() && location.ValidLongitude() {
+		location.coordinatesPaired = true
 	}
 
 	if nested, ok := fields["location"]; ok {
@@ -360,39 +547,63 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 		merged = *primary
 	}
 	if fallback != nil {
+		compatibleFallback := countryIdentitiesCompatible(&merged, fallback)
+
+		// A place-only primary (city/region with no country identity) must not
+		// absorb fallback geography that carries a different country identity.
+		primaryPlaceOnly := merged.Country == "" && merged.CountryName == "" &&
+			(merged.City != "" || merged.Region != "")
+		if primaryPlaceOnly {
+			fallbackIdentities, fallbackValid := locationCountryIdentities(fallback)
+			if !fallbackValid || len(fallbackIdentities) > 0 {
+				compatibleFallback = false
+			}
+		}
+
+		if !compatibleFallback {
+			if !merged.HasData() {
+				return nil
+			}
+			return &merged
+		}
+
 		if merged.Country == "" {
 			merged.Country = fallback.Country
 		}
 
-		effectiveCountry := strings.TrimSpace(merged.Country)
-		fallbackCountry := strings.TrimSpace(fallback.Country)
-		compatibleFallback := fallbackCountry == "" ||
-			effectiveCountry == "" ||
-			strings.EqualFold(fallbackCountry, effectiveCountry)
+		if merged.City == "" {
+			merged.City = fallback.City
+		}
+		if merged.Region == "" {
+			merged.Region = fallback.Region
+		}
+		if merged.CountryName == "" && fallback.CountryName != "" {
+			merged.CountryName = fallback.CountryName
+		}
 
-		if compatibleFallback {
-			if merged.City == "" {
-				merged.City = fallback.City
+		primaryHasLatitude := merged.ValidLatitude()
+		primaryHasLongitude := merged.ValidLongitude()
+		fallbackHasLatitude := fallback.ValidLatitude()
+		fallbackHasLongitude := fallback.ValidLongitude()
+		fallbackPaired := fallback.hasPairedCoordinates()
+
+		if !primaryHasLatitude && !primaryHasLongitude {
+			if fallbackPaired {
+				merged.SetCoordinates(fallback.Latitude, fallback.Longitude)
+			} else {
+				if fallbackHasLatitude {
+					merged.SetLatitude(fallback.Latitude)
+				}
+				if fallbackHasLongitude {
+					merged.SetLongitude(fallback.Longitude)
+				}
 			}
-			if merged.Region == "" {
-				merged.Region = fallback.Region
-			}
-		}
-		if compatibleFallback && merged.CountryName == "" {
-			if fallback.CountryName != "" &&
-				(fallbackCountry == "" ||
-					effectiveCountry == "" ||
-					strings.EqualFold(fallbackCountry, effectiveCountry)) {
-				merged.CountryName = fallback.CountryName
-			}
-		}
-		if compatibleFallback {
-			if !merged.ValidLatitude() && fallback.ValidLatitude() {
-				merged.SetLatitude(fallback.Latitude)
-			}
-			if !merged.ValidLongitude() && fallback.ValidLongitude() {
-				merged.SetLongitude(fallback.Longitude)
-			}
+		} else if primaryHasLatitude && !primaryHasLongitude &&
+			fallbackPaired {
+			merged.SetLongitude(fallback.Longitude)
+		} else if !primaryHasLatitude && primaryHasLongitude &&
+			fallbackPaired {
+			merged.SetLatitude(fallback.Latitude)
 		}
 	}
 	if !merged.HasData() {

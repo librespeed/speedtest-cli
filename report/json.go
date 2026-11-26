@@ -45,6 +45,8 @@ type Server struct {
 // Client represents the speed test client's information
 type Client struct {
 	defs.IPInfoResponse
+	// Location is normalized approximate IP-derived metadata. It is separate
+	// from the legacy embedded IPInfoResponse.Location (the "loc" field).
 	Location *defs.LocationInfo `json:"location,omitempty"`
 }
 
@@ -52,6 +54,20 @@ type Client struct {
 // The payload may be an object, an empty string, or absent; anything that does
 // not parse as an object yields an empty Client rather than an error.
 func NewClient(raw json.RawMessage, structuredLocations ...*defs.LocationInfo) Client {
+	if len(structuredLocations) > 1 {
+		// A structured location argument is optional and singular. Reject extra
+		// arguments without applying the silently selected first value.
+		return NewClientWithLocation(raw, nil)
+	}
+	if len(structuredLocations) == 1 {
+		return NewClientWithLocation(raw, structuredLocations[0])
+	}
+	return NewClientWithLocation(raw, nil)
+}
+
+// NewClientWithLocation is the explicit form of NewClient for structured
+// location metadata. Legacy rawIspInfo location fields remain a fallback.
+func NewClientWithLocation(raw json.RawMessage, structuredLocation *defs.LocationInfo) Client {
 	var data struct {
 		defs.IPInfoResponse
 		ASName string `json:"as_name"`
@@ -69,9 +85,7 @@ func NewClient(raw json.RawMessage, structuredLocations ...*defs.LocationInfo) C
 	}
 
 	location := defs.LocationFromRawISPInfo(raw)
-	if len(structuredLocations) > 0 {
-		location = defs.MergeLocations(structuredLocations[0], location)
-	}
+	location = defs.MergeLocations(structuredLocation, location)
 	c.Location = location
 
 	return c

@@ -324,7 +324,7 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 					}
 				}
 
-				rep.Client = report.NewClient(ispInfo.RawISPInfo, ispInfo.EffectiveLocation())
+				rep.Client = report.NewClientWithLocation(ispInfo.RawISPInfo, ispInfo.EffectiveLocation())
 				rep.Client.Readme = ""
 				// IP() falls back to processedString, so the report carries an
 				// address even when the backend keeps rawIspInfo empty.
@@ -395,7 +395,9 @@ func noneResponding(down []downServer) error {
 	return fmt.Errorf("None of the %d selected servers is responding: %s", len(down), strings.Join(causes, "; "))
 }
 
-// sendTelemetry sends the telemetry result to server, if --share is given
+// sendTelemetry sends the telemetry result to server, if --share is given.
+// The ispinfo multipart field preserves legacy processedString/rawIspInfo and
+// also carries the optional normalized location object when available.
 func sendTelemetry(telemetryServer defs.TelemetryServer, ispInfo *defs.GetIPResult, download, upload, pingVal, jitter float64, logs string, extra defs.TelemetryExtra) (string, error) {
 	var buf bytes.Buffer
 	wr := multipart.NewWriter(&buf)

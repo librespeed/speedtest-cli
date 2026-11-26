@@ -264,3 +264,180 @@ func TestMergeLocationsCopiesMatchingCountryName(t *testing.T) {
 		t.Errorf("matching country name not copied: %#v", merged)
 	}
 }
+
+func TestMergeLocationsCountryNameOnlyRejectsConflictingFallback(t *testing.T) {
+	primary := &LocationInfo{
+		City:        "Washington",
+		Region:      "District of Columbia",
+		CountryName: "United States",
+	}
+	fallback := &LocationInfo{
+		City:        "Berlin",
+		Region:      "Berlin",
+		Country:     "DE",
+		CountryName: "Germany",
+		Latitude:    52.52,
+		Longitude:   13.405,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "" {
+		t.Errorf("fallback country code crossed country-name-only primary: %#v", merged)
+	}
+	if merged.CountryName != "United States" {
+		t.Errorf("primary country name changed: %#v", merged)
+	}
+	if merged.City != "Washington" || merged.Region != "District of Columbia" {
+		t.Errorf("fallback place crossed country-name-only primary: %#v", merged)
+	}
+	if merged.ValidCoordinates() {
+		t.Errorf("fallback coordinates crossed country-name-only primary: %#v", merged)
+	}
+}
+
+func TestMergeLocationsCountryNameOnlyAcceptsCompatibleFallback(t *testing.T) {
+	primary := &LocationInfo{
+		City:        "Washington",
+		Region:      "District of Columbia",
+		CountryName: "United States",
+	}
+	fallback := &LocationInfo{
+		City:        "Boydton",
+		Region:      "Virginia",
+		Country:     "US",
+		CountryName: "United States",
+		Latitude:    36.6676,
+		Longitude:   -78.3875,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "US" {
+		t.Errorf("compatible fallback country code not copied: %#v", merged)
+	}
+	if merged.CountryName != "United States" {
+		t.Errorf("compatible primary country name changed: %#v", merged)
+	}
+	if merged.City != "Washington" || merged.Region != "District of Columbia" {
+		t.Errorf("compatible merge replaced primary place: %#v", merged)
+	}
+	if !merged.ValidCoordinates() || merged.Latitude != 36.6676 || merged.Longitude != -78.3875 {
+		t.Errorf("compatible fallback coordinates not merged: %#v", merged)
+	}
+}
+
+func TestMergeLocationsCountryNameOnlyAcceptsAbsentFallbackIdentity(t *testing.T) {
+	primary := &LocationInfo{
+		City:        "Washington",
+		CountryName: "United States",
+	}
+	fallback := &LocationInfo{
+		City:      "Boston",
+		Region:    "Massachusetts",
+		Latitude:  42.3601,
+		Longitude: -71.0589,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "" || merged.CountryName != "United States" {
+		t.Errorf("fallback identity changed primary country identity: %#v", merged)
+	}
+	if merged.City != "Washington" || merged.Region != "Massachusetts" {
+		t.Errorf("fallback place/region merge unexpected: %#v", merged)
+	}
+	if !merged.ValidCoordinates() || merged.Latitude != 42.3601 || merged.Longitude != -71.0589 {
+		t.Errorf("identity-absent fallback coordinates not merged: %#v", merged)
+	}
+}
+
+func TestMergeLocationsPlaceOnlyRejectsCountryIdentityFallback(t *testing.T) {
+	primary := &LocationInfo{City: "Berlin"}
+	fallback := &LocationInfo{
+		City:        "Boydton",
+		Region:      "Virginia",
+		Country:     "US",
+		CountryName: "United States",
+		Latitude:    36.6676,
+		Longitude:   -78.3875,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "" || merged.CountryName != "" {
+		t.Errorf("fallback country identity crossed place-only primary: %#v", merged)
+	}
+	if merged.City != "Berlin" || merged.Region != "" {
+		t.Errorf("fallback place crossed place-only primary: %#v", merged)
+	}
+	if merged.ValidCoordinates() {
+		t.Errorf("fallback coordinates crossed place-only primary: %#v", merged)
+	}
+}
+
+func TestMergeLocationsCountryNameOnlyRejectsInconsistentFallback(t *testing.T) {
+	primary := &LocationInfo{CountryName: "United States"}
+	fallback := &LocationInfo{
+		City:        "Boydton",
+		Region:      "Virginia",
+		Country:     "US",
+		CountryName: "Germany",
+		Latitude:    36.6676,
+		Longitude:   -78.3875,
+	}
+
+	merged := MergeLocations(primary, fallback)
+	if merged == nil {
+		t.Fatal("merged location returned nil")
+	}
+	if merged.Country != "" || merged.City != "" || merged.Region != "" ||
+		merged.ValidCoordinates() {
+		t.Errorf("inconsistent fallback geography copied: %#v", merged)
+	}
+	if merged.CountryName != "United States" {
+		t.Errorf("primary country name changed: %#v", merged)
+	}
+}
+
+func TestMergeLocationsDoesNotMixUnpairedCoordinates(t *testing.T) {
+	t.Run("primary latitude only", func(t *testing.T) {
+		primary := &LocationInfo{Latitude: 36.6676}
+		fallback := &LocationInfo{Longitude: -78.3875}
+
+		merged := MergeLocations(primary, fallback)
+		if merged == nil {
+			t.Fatal("merged location returned nil")
+		}
+		if !merged.ValidLatitude() || merged.Latitude != 36.6676 {
+			t.Errorf("primary latitude changed: %#v", merged)
+		}
+		if merged.ValidLongitude() {
+			t.Errorf("unpaired fallback longitude was mixed into primary: %#v", merged)
+		}
+	})
+
+	t.Run("primary longitude only", func(t *testing.T) {
+		primary := &LocationInfo{Longitude: -78.3875}
+		fallback := &LocationInfo{Latitude: 36.6676}
+
+		merged := MergeLocations(primary, fallback)
+		if merged == nil {
+			t.Fatal("merged location returned nil")
+		}
+		if merged.ValidLatitude() {
+			t.Errorf("unpaired fallback latitude was mixed into primary: %#v", merged)
+		}
+		if !merged.ValidLongitude() || merged.Longitude != -78.3875 {
+			t.Errorf("primary longitude changed: %#v", merged)
+		}
+	})
+}

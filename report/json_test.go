@@ -56,7 +56,7 @@ func TestNewClientStructuredLocation(t *testing.T) {
 		Longitude:   -78.3875,
 	}
 
-	c := NewClient(raw, structured)
+	c := NewClientWithLocation(raw, structured)
 	if c.Location == nil {
 		t.Fatal("Location returned nil")
 	}
@@ -88,5 +88,19 @@ func TestNewClientLegacyRawIspLocationFallback(t *testing.T) {
 	}
 	if !c.Location.ValidCoordinates() {
 		t.Errorf("legacy coordinates not valid: %#v", c.Location)
+	}
+}
+
+func TestNewClientRejectsMultipleStructuredLocations(t *testing.T) {
+	raw := json.RawMessage(`{"city":"Boydton","region":"Virginia","country":"US","loc":"36.6676,-78.3875","org":"Microsoft"}`)
+	first := &defs.LocationInfo{City: "Berlin", Country: "DE"}
+	second := &defs.LocationInfo{City: "Washington", Country: "US"}
+
+	c := NewClient(raw, first, second)
+	if c.Location == nil {
+		t.Fatal("legacy Location returned nil")
+	}
+	if c.Location.Country != "US" || c.Location.City != "Boydton" {
+		t.Errorf("extra structured location arguments changed the result: %#v", c.Location)
 	}
 }
