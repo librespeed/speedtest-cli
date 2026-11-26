@@ -131,6 +131,26 @@ func TestGetIPInfoMalformedLocationIsNonFatal(t *testing.T) {
 	}
 }
 
+func TestGetIPInfoCountryOnlyLocationKeepsPartialPlace(t *testing.T) {
+	got := getIPResultFromPayload(t, `{
+		"processedString":"128.94.2.134 - AS8075",
+		"rawIspInfo":{"ip":"128.94.2.134","city":"Boydton","region":"Virginia","country":"US","loc":"36.6676,-78.3875","org":"Microsoft"},
+		"location":{"country":"US","countryName":"United States"}
+	}`)
+
+	location := got.EffectiveLocation()
+	if location == nil {
+		t.Fatal("EffectiveLocation returned nil")
+	}
+	if location.City != "Boydton" || location.Region != "Virginia" ||
+		location.Country != "US" || location.CountryName != "United States" {
+		t.Errorf("country-only location lost partial place: %#v", location)
+	}
+	if !location.ValidCoordinates() || location.Latitude != 36.6676 || location.Longitude != -78.3875 {
+		t.Errorf("country-only location lost coordinates: %#v", location)
+	}
+}
+
 // --- Upload against a server with librespeed-rs body semantics ---
 
 // librespeedRSLikeServer mimics the hand-written HTTP body handling of

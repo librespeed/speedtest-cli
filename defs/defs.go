@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/language/display"
@@ -205,10 +206,10 @@ func (l LocationInfo) MarshalJSON() ([]byte, error) {
 		Country     string   `json:"country,omitempty"`
 		CountryName string   `json:"countryName,omitempty"`
 	}{
-		City:        l.City,
-		Region:      l.Region,
-		Country:     l.Country,
-		CountryName: l.CountryName,
+		City:        CleanLocationText(l.City),
+		Region:      CleanLocationText(l.Region),
+		Country:     CleanLocationText(l.Country),
+		CountryName: CleanLocationText(l.CountryName),
 	}
 	if l.ValidLatitude() {
 		latitude := l.Latitude
@@ -245,6 +246,18 @@ func (g *GetIPResult) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// CleanLocationText removes control and invisible formatting characters and
+// trims surrounding whitespace so unusable text cannot suppress fallbacks.
+func CleanLocationText(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, value)
+	return strings.TrimSpace(value)
+}
+
 func rawString(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -253,7 +266,7 @@ func rawString(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return ""
 	}
-	return value
+	return CleanLocationText(value)
 }
 
 func rawCoordinate(raw json.RawMessage) (float64, bool) {
@@ -297,6 +310,7 @@ func isValidLongitude(longitude float64) bool {
 }
 
 func normalizeCountryIdentity(value string) string {
+	value = CleanLocationText(value)
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.NewReplacer(".", "", "_", " ", "-", " ").Replace(value)
 	return strings.Join(strings.Fields(value), " ")
@@ -450,7 +464,8 @@ func (l *LocationInfo) HasData() bool {
 	if l == nil {
 		return false
 	}
-	return l.City != "" || l.Region != "" || l.Country != "" || l.CountryName != "" ||
+	return CleanLocationText(l.City) != "" || CleanLocationText(l.Region) != "" ||
+		CleanLocationText(l.Country) != "" || CleanLocationText(l.CountryName) != "" ||
 		l.ValidLatitude() || l.ValidLongitude()
 }
 
@@ -537,15 +552,24 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 	if primary != nil {
 		merged = *primary
 	}
+	merged.City = CleanLocationText(merged.City)
+	merged.Region = CleanLocationText(merged.Region)
+	merged.Country = CleanLocationText(merged.Country)
+	merged.CountryName = CleanLocationText(merged.CountryName)
 	if fallback != nil {
-		compatibleFallback := countryIdentitiesCompatible(&merged, fallback)
+		fallbackCopy := *fallback
+		fallbackCopy.City = CleanLocationText(fallbackCopy.City)
+		fallbackCopy.Region = CleanLocationText(fallbackCopy.Region)
+		fallbackCopy.Country = CleanLocationText(fallbackCopy.Country)
+		fallbackCopy.CountryName = CleanLocationText(fallbackCopy.CountryName)
+		compatibleFallback := countryIdentitiesCompatible(&merged, &fallbackCopy)
 
 		// A place-only primary (city/region with no country identity) must not
 		// absorb fallback geography that carries a different country identity.
 		primaryPlaceOnly := merged.Country == "" && merged.CountryName == "" &&
 			(merged.City != "" || merged.Region != "")
 		if primaryPlaceOnly {
-			fallbackIdentities, fallbackValid := locationCountryIdentities(fallback)
+			fallbackIdentities, fallbackValid := locationCountryIdentities(&fallbackCopy)
 			if !fallbackValid || len(fallbackIdentities) > 0 {
 				compatibleFallback = false
 			}
@@ -559,42 +583,42 @@ func MergeLocations(primary, fallback *LocationInfo) *LocationInfo {
 		}
 
 		if merged.Country == "" {
-			merged.Country = fallback.Country
+			merged.Country = fallbackCopy.Country
 		}
 
 		if merged.City == "" {
-			merged.City = fallback.City
+			merged.City = fallbackCopy.City
 		}
 		if merged.Region == "" {
-			merged.Region = fallback.Region
+			merged.Region = fallbackCopy.Region
 		}
-		if merged.CountryName == "" && fallback.CountryName != "" {
-			merged.CountryName = fallback.CountryName
+		if merged.CountryName == "" && fallbackCopy.CountryName != "" {
+			merged.CountryName = fallbackCopy.CountryName
 		}
 
 		primaryHasLatitude := merged.ValidLatitude()
 		primaryHasLongitude := merged.ValidLongitude()
-		fallbackHasLatitude := fallback.ValidLatitude()
-		fallbackHasLongitude := fallback.ValidLongitude()
-		fallbackPaired := fallback.hasPairedCoordinates()
+		fallbackHasLatitude := fallbackCopy.ValidLatitude()
+		fallbackHasLongitude := fallbackCopy.ValidLongitude()
+		fallbackPaired := fallbackCopy.hasPairedCoordinates()
 
 		if !primaryHasLatitude && !primaryHasLongitude {
 			if fallbackPaired {
-				merged.SetCoordinates(fallback.Latitude, fallback.Longitude)
+				merged.SetCoordinates(fallbackCopy.Latitude, fallbackCopy.Longitude)
 			} else {
 				if fallbackHasLatitude {
-					merged.SetLatitude(fallback.Latitude)
+					merged.SetLatitude(fallbackCopy.Latitude)
 				}
 				if fallbackHasLongitude {
-					merged.SetLongitude(fallback.Longitude)
+					merged.SetLongitude(fallbackCopy.Longitude)
 				}
 			}
 		} else if primaryHasLatitude && !primaryHasLongitude &&
 			fallbackPaired {
-			merged.SetLongitude(fallback.Longitude)
+			merged.SetLongitude(fallbackCopy.Longitude)
 		} else if !primaryHasLatitude && primaryHasLongitude &&
 			fallbackPaired {
-			merged.SetLatitude(fallback.Latitude)
+			merged.SetLatitude(fallbackCopy.Latitude)
 		}
 	}
 	if !merged.HasData() {

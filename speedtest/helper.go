@@ -35,7 +35,7 @@ func approximateLocationSummary(location *defs.LocationInfo) string {
 
 	var place []string
 	appendPlace := func(value string) {
-		value = strings.TrimSpace(value)
+		value = defs.CleanLocationText(value)
 		if value == "" {
 			return
 		}
@@ -48,10 +48,12 @@ func approximateLocationSummary(location *defs.LocationInfo) string {
 	}
 	appendPlace(location.City)
 	appendPlace(location.Region)
-	if location.CountryName != "" {
-		appendPlace(location.CountryName)
+	countryName := defs.CleanLocationText(location.CountryName)
+	country := defs.CleanLocationText(location.Country)
+	if countryName != "" {
+		appendPlace(countryName)
 	} else {
-		appendPlace(location.Country)
+		appendPlace(country)
 	}
 
 	summary := strings.Join(place, ", ")
@@ -286,10 +288,10 @@ func doSpeedTest(c *cli.Context, servers []defs.Server, telemetryServer defs.Tel
 				rep.Share = shareLink
 				rep.IP = ispInfo.IP()
 				if location := ispInfo.EffectiveLocation(); location != nil {
-					rep.City = location.City
-					rep.Region = location.Region
-					rep.Country = location.Country
-					rep.CountryName = location.CountryName
+					rep.City = defs.CleanLocationText(location.City)
+					rep.Region = defs.CleanLocationText(location.Region)
+					rep.Country = defs.CleanLocationText(location.Country)
+					rep.CountryName = defs.CleanLocationText(location.CountryName)
 					if location.ValidLatitude() {
 						rep.Latitude = strconv.FormatFloat(location.Latitude, 'f', -1, 64)
 					}

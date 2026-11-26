@@ -1,6 +1,9 @@
 package speedtest
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -44,6 +47,76 @@ func TestApproximateLocationSummarySingleValidCoordinate(t *testing.T) {
 
 	if got, want := approximateLocationSummary(location), "Boydton (Latitude 36.6676)"; got != want {
 		t.Errorf("approximateLocationSummary = %q, want %q", got, want)
+	}
+}
+
+func TestApproximateLocationSummaryCleansWhitespaceAndInvisibleText(t *testing.T) {
+	location := &defs.LocationInfo{
+		City:        "   ",
+		Region:      "\u200b",
+		Country:     "US",
+		CountryName: "\n",
+	}
+
+	if got, want := approximateLocationSummary(location), "US"; got != want {
+		t.Errorf("approximateLocationSummary = %q, want %q", got, want)
+	}
+}
+
+func TestSendTelemetryPreservesLocationMetadata(t *testing.T) {
+	ispInfoPayload := make(chan string, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+			http.Error(w, "bad multipart", http.StatusBadRequest)
+			return
+		}
+		ispInfoPayload <- r.FormValue("ispinfo")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("1 abc"))
+	}))
+	t.Cleanup(ts.Close)
+
+	oldClient := telemetryClient
+	telemetryClient = ts.Client()
+	t.Cleanup(func() { telemetryClient = oldClient })
+
+	telemetryServer := defs.TelemetryServer{
+		Level:  defs.TelemetryLevelFull,
+		Server: ts.URL,
+		Path:   "telemetry",
+		Share:  "share",
+	}
+	ispInfo := &defs.GetIPResult{
+		ProcessedString: "128.94.2.134 - AS8075",
+		RawISPInfo:      []byte(`{"ip":"128.94.2.134","city":"Boydton","org":"Microsoft"}`),
+		Location: &defs.LocationInfo{
+			City:        "Boydton",
+			Region:      "Virginia",
+			Country:     "US",
+			CountryName: "United States",
+			Latitude:    36.6676,
+			Longitude:   -78.3875,
+		},
+	}
+
+	link, err := sendTelemetry(telemetryServer, ispInfo, 100, 50, 10, 1, "", defs.TelemetryExtra{})
+	if err != nil {
+		t.Fatalf("sendTelemetry: %v", err)
+	}
+	if !strings.Contains(link, "id=abc") {
+		t.Errorf("share link = %q, want id=abc", link)
+	}
+
+	payload := <-ispInfoPayload
+	for _, want := range []string{
+		`"processedString":"128.94.2.134 - AS8075"`,
+		`"rawIspInfo":{"ip":"128.94.2.134","city":"Boydton","org":"Microsoft"}`,
+		`"location":{"latitude":36.6676,"longitude":-78.3875,"city":"Boydton","region":"Virginia","country":"US","countryName":"United States"}`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Errorf("telemetry ispinfo lacks %s: %s", want, payload)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package defs
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -132,6 +133,78 @@ func TestLocationFromLegacyRawIspInfo(t *testing.T) {
 	}
 	if !location.ValidCoordinates() || location.Latitude != 36.6676 || location.Longitude != -78.3875 {
 		t.Errorf("legacy coordinates = (%v, %v)", location.Latitude, location.Longitude)
+	}
+}
+
+func TestWhitespaceAndInvisibleLocationFallsBackToLegacy(t *testing.T) {
+	var got GetIPResult
+	payload := []byte(`{
+		"processedString":"128.94.2.134 - AS8075",
+		"rawIspInfo":{"ip":"128.94.2.134","city":"Boydton","region":"Virginia","country":"US","countryName":"United States","loc":"36.6676,-78.3875","org":"Microsoft"},
+		"location":{"city":"   ","region":"\u200b","country":"\t","countryName":"\n"}
+	}`)
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	location := got.EffectiveLocation()
+	if location == nil {
+		t.Fatal("EffectiveLocation returned nil")
+	}
+	if location.City != "Boydton" || location.Region != "Virginia" ||
+		location.Country != "US" || location.CountryName != "United States" {
+		t.Errorf("whitespace location did not fall back: %#v", location)
+	}
+	if !location.ValidCoordinates() || location.Latitude != 36.6676 || location.Longitude != -78.3875 {
+		t.Errorf("whitespace location lost coordinates: %#v", location)
+	}
+}
+
+func TestFiniteCoordinateFallbacksRejectInvalidPrimaryValues(t *testing.T) {
+	var got GetIPResult
+	payload := []byte(`{
+		"processedString":"128.94.2.134 - AS8075",
+		"rawIspInfo":{"ip":"128.94.2.134","loc":"36.6676,-78.3875","org":"Microsoft"},
+		"location":{"city":"Example City","latitude":91,"longitude":"Infinity","lat":38.1234,"lon":-77.1234}
+	}`)
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	location := got.EffectiveLocation()
+	if location == nil {
+		t.Fatal("EffectiveLocation returned nil")
+	}
+	if location.City != "Example City" {
+		t.Errorf("place metadata lost: %#v", location)
+	}
+	if !location.ValidCoordinates() || location.Latitude != 38.1234 || location.Longitude != -77.1234 {
+		t.Errorf("finite fallback coordinates not used: %#v", location)
+	}
+}
+
+func TestLocationMarshalPreservesRawAndLegacyFields(t *testing.T) {
+	got := GetIPResult{
+		ProcessedString: "128.94.2.134 - AS8075",
+		RawISPInfo:      json.RawMessage(`{"ip":"128.94.2.134","city":"Boydton","org":"Microsoft"}`),
+		Location: &LocationInfo{
+			City:        "Boydton",
+			Country:     "US",
+			CountryName: "United States",
+			Latitude:    36.6676,
+			Longitude:   -78.3875,
+		},
+	}
+
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	text := string(b)
+	for _, want := range []string{`"processedString":"128.94.2.134 - AS8075"`, `"rawIspInfo":{"ip":"128.94.2.134","city":"Boydton","org":"Microsoft"}`, `"location":{"latitude":36.6676,"longitude":-78.3875,"city":"Boydton","country":"US","countryName":"United States"}`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("marshal lacks %s: %s", want, text)
+		}
 	}
 }
 

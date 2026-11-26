@@ -78,6 +78,9 @@ func NewClientWithLocation(raw json.RawMessage, structuredLocation *defs.Locatio
 	}
 
 	c := Client{IPInfoResponse: data.IPInfoResponse}
+	c.City = defs.CleanLocationText(c.City)
+	c.Region = defs.CleanLocationText(c.Region)
+	c.Country = defs.CleanLocationText(c.Country)
 
 	// Current backends use as_name, while older ones use org.
 	if c.Organization == "" {
